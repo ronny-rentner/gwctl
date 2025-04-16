@@ -40,14 +40,4 @@ def build_and_check_dists(session):
     session.run("python", "-m", "twine", "check", "dist/*")
 
 
-@nox.session(python=["3.9", "3.10", "3.11", "3.12", "3.13"])
-def tests(session):
-    session.install("pytest")
-    build_and_check_dists(session)
-
-    generated_files = os.listdir("dist/")
-    generated_sdist = os.path.join("dist/", generated_files[1])
-
-    session.install(generated_sdist)
-
-    session.run("py.test", "tests/", *session.posargs)
+# No tests needed as they require a running GNOME session
