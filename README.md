@@ -1,11 +1,11 @@
-# GNOME Window Control (gwctl)
+# GNOME Wayland Window Control (gwctl)
 
-A command-line interface for controlling GNOME windows through D-Bus.
+A command-line interface for controlling GNOME Wayland windows through D-Bus.
 
 ## Features
 
 - List all windows and their properties
-- Move, resize, and manipulate windows
+- Move, resize, and manipulate Wayland windows
 - Dynamic command generation based on available D-Bus methods
 - Easy to use command-line interface
 

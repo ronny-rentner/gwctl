@@ -29,7 +29,7 @@ version = "0.1.0"
 
 # This is a one-line description or tagline of what your project does. This
 # corresponds to the "Summary" metadata field:
-description = "GNOME Window Control - Command-line interface for managing GNOME windows"
+description = "GNOME Wayland Window Control - Command-line interface for managing GNOME Wayland windows"
 
 # This is an optional longer description of your project that represents
 # the body of text which users will see when they visit PyPI.
@@ -148,6 +148,6 @@ gwctl = "gwctl:main"
 
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
-[tool.setuptools]
+#[tool.setuptools]
 # Configure packages
-py-modules = ["gwctl"]
+#py-modules = ["gwctl"]

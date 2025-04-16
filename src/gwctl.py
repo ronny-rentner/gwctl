@@ -13,14 +13,14 @@ OBJ_PATH = '/org/gnome/Shell/Extensions/Windows'
 IFACE_NAME = 'org.gnome.Shell.Extensions.Windows'
 
 class SetupCommand:
-    """Tools for setting up and troubleshooting the GNOME window management interface."""
+    """Tools for setting up and troubleshooting the GNOME Wayland window management interface."""
 
     @click.command()
     def install_extension(self):
-        click.output.headline("GNOME Window Management API Extension Required\n")
+        click.output.headline("GNOME Wayland Window Management API Extension Required\n")
         click.output.warning(
             "This tool requires a GNOME Shell extension that provides a D-Bus interface\n"
-            "for window management. No such extension was detected on your system.\n"
+            "for Wayland window management. No such extension was detected on your system.\n"
         )
         click.output.info(
             "To enable window management functionality, you need to:\n"
@@ -84,9 +84,9 @@ def create_method_command(method_name, details):
     return method_command
 
 class GnomeWindowControl:
-    """GNOME Window Control.
+    """GNOME Wayland Window Control.
 
-    This tool provides commands for interacting with GNOME windows through D-Bus.
+    This tool provides commands for interacting with GNOME Wayland windows through D-Bus.
     Commands are dynamically generated based on the methods available on the D-Bus interface.
     """
 
@@ -253,7 +253,7 @@ class GnomeWindowControl:
         dbus_info = f"Connected to: {IFACE_NAME}\n" \
                    f"Available methods: {len(self.methods)}"
 
-        return f"gwctl v{version} - GNOME Window Control\n\n{dbus_info}"
+        return f"gwctl v{version} - GNOME Wayland Window Control\n\n{dbus_info}"
 
 
 def main():
