@@ -4,6 +4,7 @@ import sys
 import json
 import dbus
 import xml.etree.ElementTree as ET
+import pkg_resources
 import ultraclick as click
 
 # DBus constants
@@ -246,10 +247,13 @@ class GnomeWindowControl:
         Displays the version of gwctl along with information about
         the connected D-Bus interface.
         """
+        # Get version from package metadata
+        version = pkg_resources.get_distribution('gwctl').version
+        
         dbus_info = f"Connected to: {IFACE_NAME}\n" \
                    f"Available methods: {len(self.methods)}"
 
-        return f"gwctl v0.2.0 - GNOME Window Control\n\n{dbus_info}"
+        return f"gwctl v{version} - GNOME Window Control\n\n{dbus_info}"
 
 
 def main():
