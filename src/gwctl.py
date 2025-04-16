@@ -4,7 +4,7 @@ import sys
 import json
 import dbus
 import xml.etree.ElementTree as ET
-import pkg_resources
+import importlib.metadata
 import ultraclick as click
 
 # DBus constants
@@ -191,15 +191,26 @@ class GnomeWindowControl:
         return context
 
     @click.option("--verbose", is_flag=True, help="Enable verbose output")
-    def __init__(self, verbose=False):
+    @click.option("--filter", nargs=2, is_eager=True, multiple=True, help="Filter JSON output by field and value (e.g., --filter wm_class firefox)")
+    @click.option("--field", help="Extract only the specified field from results (e.g., --field id)")
+    def __init__(self, verbose=False, filter=None, field=None):
         self.verbose = verbose
+        self.filter = filter
+        self.field = field
 
-        # Share verbose flag with child commands
+        # Share options with child commands
         click.ctx.meta['verbose'] = verbose
+        click.ctx.meta['filter'] = filter
+        click.ctx.meta['field'] = field
 
         if verbose:
             click.output.info(f"Connected to {IFACE_NAME}")
             click.output.info(f"Found {len(click.ctx.meta['methods'])} methods")
+            if filter:
+                filters_str = ", ".join([f"{f[0]}={f[1]}" for f in filter])
+                click.output.info(f"Filtering results: {filters_str}")
+            if field:
+                click.output.info(f"Extracting field: {field}")
 
     @property
     def methods(self):
@@ -207,8 +218,7 @@ class GnomeWindowControl:
         return self._methods
 
     def _call_dbus_method(self, method_name, **kwargs):
-        """Execute a D-Bus method call and process its result.
-        """
+        """Execute a D-Bus method call and process its result."""
         # Get D-Bus interface from context
         iface = click.ctx.meta['dbus_iface']
 
@@ -234,6 +244,20 @@ class GnomeWindowControl:
         if isinstance(result, str):
             try:
                 parsed = json.loads(result)
+                
+                # Apply filters if present
+                filters = click.ctx.meta.get('filter')
+                if filters and isinstance(parsed, list):
+                    # Apply each filter criteria
+                    for field, value in filters:
+                        parsed = [item for item in parsed if field in item and str(item[field]) == value]
+                
+                # Extract specific field if requested
+                field = click.ctx.meta.get('field')
+                if field and isinstance(parsed, list):
+                    # Print one value per line for easy piping
+                    return "\n".join(str(item.get(field, "")) for item in parsed)
+                    
                 return json.dumps(parsed, indent=2)
             except Exception:
                 pass
@@ -248,7 +272,7 @@ class GnomeWindowControl:
         the connected D-Bus interface.
         """
         # Get version from package metadata
-        version = pkg_resources.get_distribution('gwctl').version
+        version = importlib.metadata.version('gwctl')
         
         dbus_info = f"Connected to: {IFACE_NAME}\n" \
                    f"Available methods: {len(self.methods)}"
