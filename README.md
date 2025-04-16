@@ -26,6 +26,22 @@ pip install gwctl
 ### Optional
 - [jq](https://jqlang.github.io/jq/) - for advanced filtering and formatting of JSON output
 
+## Shell Completion
+
+### Bash
+
+```bash
+# Add to your ~/.bashrc for permanent completion
+eval "$(_GWCTL_COMPLETE=bash_source gwctl)"
+```
+
+### Zsh
+
+```bash
+# Add to your ~/.zshrc for permanent completion
+eval "$(_GWCTL_COMPLETE=zsh_source gwctl)"
+```
+
 ## Usage
 
 ```bash
