@@ -19,26 +19,17 @@ build-backend = "setuptools.build_meta" # If not defined, then legacy behavior c
 # package, this name will be registered for you. It will determine how
 # users can install this project, e.g.:
 #
-# $ pip install sampleproject
+# $ pip install gwctl
 #
-# And where it will live on PyPI: https://pypi.org/project/sampleproject/
-#
-# There are some restrictions on what makes a valid project name
-# specification here:
-# https://packaging.python.org/specifications/core-metadata/#name
-name = "sampleproject" # REQUIRED, is the only field that cannot be marked as dynamic.
+name = "gwctl"
 
 # Versions should comply with PEP 440:
 # https://www.python.org/dev/peps/pep-0440/
-#
-# For a discussion on single-sourcing the version, see
-# https://packaging.python.org/guides/single-sourcing-package-version/
-version = "4.0.0" # REQUIRED, although can be dynamic
+version = "0.1.0"
 
 # This is a one-line description or tagline of what your project does. This
 # corresponds to the "Summary" metadata field:
-# https://packaging.python.org/specifications/core-metadata/#summary
-description = "A sample Python project"
+description = "GNOME Window Control - Command-line interface for managing GNOME windows"
 
 # This is an optional longer description of your project that represents
 # the body of text which users will see when they visit PyPI.
@@ -67,18 +58,18 @@ license = { file = "LICENSE.txt" }
 # Note that this is a list of additional keywords, separated
 # by commas, to be used to assist searching for the distribution in a
 # larger catalog.
-keywords = ["sample", "setuptools", "development"]
+keywords = ["gnome", "window-manager", "dbus", "cli", "linux"]
 
 # This should be your name or the name of the organization who originally
 # authored the project, and a valid email address corresponding to the name
 # listed.
-authors = [{ name = "A. Random Developer", email = "author@example.com" }]
+authors = [{ name = "Ronny Rentner", email = "ronny@rentner.de" }]
 
 # This should be your name or the names of the organization who currently
 # maintains the project, and a valid email address corresponding to the name
 # listed.
 maintainers = [
-  { name = "A. Great Maintainer", email = "maintainer@example.com" },
+  { name = "Ronny Rentner", email = "ronny@rentner.de" },
 ]
 
 # Classifiers help users find your project by categorizing it.
@@ -116,7 +107,10 @@ classifiers = [
 #
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
-dependencies = ["peppercorn"]
+dependencies = [
+    "ultraclick>=0.1.0",
+    "dbus-python>=1.2.0"
+]
 
 # List additional groups of dependencies here (e.g. development
 # dependencies). Users will be able to install these using the "extras"
@@ -142,21 +136,18 @@ test = ["coverage"]
 # maintainers, and where to support the project financially. The key is
 # what's used to render the link text on PyPI.
 [project.urls]
-"Homepage" = "https://github.com/pypa/sampleproject"
-"Bug Reports" = "https://github.com/pypa/sampleproject/issues"
-"Funding" = "https://donate.pypi.org"
-"Say Thanks!" = "http://saythanks.io/to/example"
-"Source" = "https://github.com/pypa/sampleproject/"
+"Homepage" = "https://github.com/ronny-rentner/gwctl"
+"Bug Reports" = "https://github.com/ronny-rentner/gwctl/issues"
+"Source" = "https://github.com/ronny-rentner/gwctl/"
 
-# The following would provide a command line executable called `sample`
-# which executes the function `main` from this package when invoked.
+# The following would provide a command line executable called `gwctl`
+# which executes the CLI from this package when invoked.
 [project.scripts]
-sample = "sample:main"
+gwctl = "gwctl:main"
 
 
 # This is configuration specific to the `setuptools` build backend.
 # If you are using a different build backend, you will need to change this.
 [tool.setuptools]
-# If there are data files included in your packages that need to be
-# installed, specify them here.
-package-data = { "sample" = ["*.dat"] }
+# Configure packages
+py-modules = ["gwctl"]
