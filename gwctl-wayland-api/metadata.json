@@ -1,0 +1,13 @@
+{
+  "name": "Gnome Wayland API",
+  "description": "Adds DBus API calls for gwctl (Gnome Wayland/Window Control)",
+  "uuid": "gwctl-wayland-api@kamuko.de",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48"
+  ],
+  "version": "20",
+  "url": "https://github.com/ronny-rentner/gwctl/gnome-extension"
+}

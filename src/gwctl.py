@@ -3,31 +3,94 @@
 import sys
 import json
 import dbus
+import subprocess
+import os
 import xml.etree.ElementTree as ET
 import importlib.metadata
 import ultraclick as click
 
 # DBus constants
 BUS_NAME = 'org.gnome.Shell'
-OBJ_PATH = '/org/gnome/Shell/Extensions/Windows'
-IFACE_NAME = 'org.gnome.Shell.Extensions.Windows'
+DEFAULT_INTERFACES = [
+    'org.gnome.Shell.Extensions.gwctlAPI',
+    'org.gnome.Shell.Extensions.Windows'
+]
+
+def iface_to_path(iface):
+    """Derive DBus object path from interface name."""
+    return '/' + iface.replace('.', '/')
 
 class SetupCommand:
     """Tools for setting up and troubleshooting the GNOME Wayland window management interface."""
 
     @click.command()
     def install_extension(self):
-        click.output.headline("GNOME Wayland Window Management API Extension Required\n")
-        click.output.warning(
-            "This tool requires a GNOME Shell extension that provides a D-Bus interface\n"
-            "for Wayland window management. No such extension was detected on your system.\n"
-        )
-        click.output.info(
-            "To enable window management functionality, you need to:\n"
-            "1. Install the 'Windows D-Bus Interface' extension from GNOME Extensions\n"
-            "2. Enable the extension through GNOME Extensions or Tweaks\n\n"
-            "For more information, visit: [bold]https://extensions.gnome.org/[/bold]\n"
-        )
+        """Install or update the required GNOME Shell extension."""
+        # Search for extension ZIP in local directories
+        zip_files = []
+        search_paths = ['.', 'gwctl-wayland-api']
+        uuid = "gwctl-wayland-api@kamuko.de"  # Default fallback
+        
+        # Try to find UUID from metadata.json
+        if os.path.isdir('gwctl-wayland-api'):
+            metadata_path = os.path.join('gwctl-wayland-api', 'metadata.json')
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        uuid = metadata.get('uuid', uuid)
+                except Exception:
+                    pass
+
+        for path in search_paths:
+            if os.path.isdir(path):
+                for f in os.listdir(path):
+                    if f.endswith('.shell-extension.zip'):
+                        zip_files.append(os.path.join(path, f))
+        
+        if zip_files:
+            zip_files.sort(reverse=True)
+            target_zip = zip_files[0]
+            
+            click.output.headline("GNOME Wayland Window Management API Extension Found")
+            click.output.info(f"Package: [bold]{target_zip}[/bold]")
+            click.output.info(f"UUID: [bold]{uuid}[/bold]\n")
+            
+            if click.confirm("Would you like to install and enable it now?"):
+                try:
+                    # Install
+                    subprocess.run(['gnome-extensions', 'install', '--force', target_zip], check=True)
+                    click.output.success("Extension installed successfully.")
+                    
+                    # Attempt to enable
+                    click.output.info(f"Attempting to enable [bold]{uuid}[/bold]...")
+                    result = subprocess.run(['gnome-extensions', 'enable', uuid], capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        click.output.success("Extension enabled successfully!")
+                    else:
+                        click.output.warning("Could not enable extension automatically.")
+                        click.output.info("This is common on Wayland right after installation.")
+                        click.output.info("\n[bold]Required next steps:[/bold]")
+                        click.output.info("1. Restart GNOME Shell (Log out and back in)")
+                        click.output.info(f"2. Enable manually if needed: [bold]gnome-extensions enable {uuid}[/bold]")
+                except subprocess.CalledProcessError as e:
+                    click.output.error(f"Operation failed: {e}")
+                except Exception as e:
+                    click.output.error(f"An unexpected error occurred: {e}")
+        else:
+            click.output.headline("GNOME Wayland Extension Required")
+            click.output.warning("No extension package (*.shell-extension.zip) was found locally.\n")
+            click.output.info(
+                "This tool requires the 'Windows D-Bus Interface' extension to function.\n"
+                "You can install it manually from the GNOME Extensions website:\n"
+            )
+            
+            url = "https://extensions.gnome.org/"
+            click.output.info(f"Website: [bold]{url}[/bold]\n")
+
+            if click.confirm("Would you like to open the extensions website now?"):
+                click.launch(url)
 
     @click.command()
     def check_connection(self):
@@ -39,11 +102,12 @@ class SetupCommand:
         """
         # Get methods from context
         methods = click.ctx.meta.get('methods', {})
+        iface_name = click.ctx.meta.get('iface_name', 'Unknown')
 
         if methods:
             click.output.success("D-Bus connection successful")
             return (
-                f"Connected to: {IFACE_NAME}\n"
+                f"Connected to: {iface_name}\n"
                 f"Available methods: {len(methods)}\n\n"
                 "Window management functionality is available."
             )
@@ -93,7 +157,7 @@ class GnomeWindowControl:
     setup = SetupCommand
 
     @classmethod
-    def parse_introspection(cls, xml_str):
+    def parse_introspection(cls, xml_str, interface_name):
         """
         Parse D-Bus introspection XML and extract method information.
         Returns a dictionary mapping method names to their details:
@@ -104,11 +168,11 @@ class GnomeWindowControl:
         root = ET.fromstring(xml_str)
         iface_elem = None
         for iface in root.findall('interface'):
-            if iface.get('name') == IFACE_NAME:
+            if iface.get('name') == interface_name:
                 iface_elem = iface
                 break
         if iface_elem is None:
-            raise Exception(f"Interface {IFACE_NAME} not found in introspection data")
+            raise Exception(f"Interface {interface_name} not found in introspection data")
 
         methods = {}
         for method in iface_elem.findall('method'):
@@ -147,64 +211,80 @@ class GnomeWindowControl:
         return methods
 
     @classmethod
-    def setup_commands(cls):
+    def setup_commands(cls, interface=None):
         """Dynamically set up D-Bus commands and return initial context.
 
         This method:
-        1. Establishes D-Bus connections
+        1. Establishes D-Bus connections (trying fallbacks)
         2. Performs introspection
         3. Registers dynamic commands
         4. Returns a context dictionary with D-Bus resources
         """
         # Initialize context dictionary
-        context = {}
+        context = { 'methods': [] }
+        bus = dbus.SessionBus()
+        working_iface = None
+        last_error = None
 
-        try:
-            # Establish D-Bus connection
-            bus = dbus.SessionBus()
-            obj = bus.get_object(BUS_NAME, OBJ_PATH)
-            iface = dbus.Interface(obj, dbus_interface=IFACE_NAME)
+        for iface_name in ([interface] if interface else DEFAULT_INTERFACES):
+            obj_path = iface_to_path(iface_name)
+            try:
+                obj = bus.get_object(BUS_NAME, obj_path)
+                introspect_xml = obj.Introspect(dbus_interface='org.freedesktop.DBus.Introspectable')
+                methods = cls.parse_introspection(introspect_xml, iface_name)
+                
+                # Success! Store in context
+                working_iface = iface_name
+                context['dbus_bus'] = bus
+                context['dbus_obj'] = obj
+                context['dbus_iface'] = dbus.Interface(obj, dbus_interface=iface_name)
+                context['iface_name'] = iface_name
+                context['obj_path'] = obj_path
+                context['methods'] = methods
 
-            # Store in context
-            context['dbus_bus'] = bus
-            context['dbus_obj'] = obj
-            context['dbus_iface'] = iface
+                # Register commands on the class
+                for method_name, details in methods.items():
+                    cmd_name = method_name.lower()
+                    cmd = create_method_command(method_name, details)
+                    setattr(cls, cmd_name, cmd)
+                
+                break
+            except Exception as e:
+                last_error = e
+                continue
 
-            # Perform D-Bus introspection
-            introspect_xml = obj.Introspect(dbus_interface='org.freedesktop.DBus.Introspectable')
-            methods = cls.parse_introspection(introspect_xml)
-            context['methods'] = methods
-
-            # Register commands on the class
-            for method_name, details in methods.items():
-                cmd_name = method_name.lower()
-                cmd = create_method_command(method_name, details)
-                setattr(cls, cmd_name, cmd)
-
-        except Exception as e:
-            click.output.error(f"D-Bus connection failed: {e}")
+        if not working_iface:
+            click.output.error(f"D-Bus connection failed: {last_error}")
             click.output.info("Use 'gwctl setup check-connection' for diagnostics.")
 
         # Store methods in class for access via property
-        cls._methods = context['methods']
+        cls._methods = context.get('methods', [])
 
         return context
 
     @click.option("--verbose", is_flag=True, help="Enable verbose output")
+    @click.option("--interface", help="Specify the D-Bus interface name")
     @click.option("--filter", nargs=2, is_eager=True, multiple=True, help="Filter JSON output by field and value (e.g., --filter wm_class firefox)")
     @click.option("--field", help="Extract only the specified field from results (e.g., --field id)")
-    def __init__(self, verbose=False, filter=None, field=None):
+    def __init__(self, verbose=False, interface=None, filter=None, field=None):
         self.verbose = verbose
+        self.interface = interface
         self.filter = filter
         self.field = field
 
+        # Setup D-Bus commands and get initial context
+        click.ctx.meta |= GnomeWindowControl.setup_commands(interface)
+
         # Share options with child commands
         click.ctx.meta['verbose'] = verbose
+        click.ctx.meta['interface'] = interface
         click.ctx.meta['filter'] = filter
         click.ctx.meta['field'] = field
 
         if verbose:
-            click.output.info(f"Connected to {IFACE_NAME}")
+            iface_name = click.ctx.meta.get('iface_name', 'Unknown')
+            obj_path = click.ctx.meta.get('obj_path', 'Unknown')
+            click.output.info(f"Connected to {iface_name} at {obj_path}")
             click.output.info(f"Found {len(click.ctx.meta['methods'])} methods")
             if filter:
                 filters_str = ", ".join([f"{f[0]}={f[1]}" for f in filter])
@@ -273,8 +353,9 @@ class GnomeWindowControl:
         """
         # Get version from package metadata
         version = importlib.metadata.version('gwctl')
+        iface_name = click.ctx.meta.get('iface_name', 'Unknown')
         
-        dbus_info = f"Connected to: {IFACE_NAME}\n" \
+        dbus_info = f"Connected to: {iface_name}\n" \
                    f"Available methods: {len(self.methods)}"
 
         return f"gwctl v{version} - GNOME Wayland Window Control\n\n{dbus_info}"
@@ -282,11 +363,8 @@ class GnomeWindowControl:
 
 def main():
     """Entry point for the application when installed as a package."""
-    # Setup D-Bus commands and get initial context
-    meta = GnomeWindowControl.setup_commands()
-    
     # Run CLI with this context
-    click.group_from_class(GnomeWindowControl, name="gwctl", initial_ctx_meta=meta)()
+    click.group_from_class(GnomeWindowControl, name="gwctl")()
 
 if __name__ == "__main__":
     # For direct script execution

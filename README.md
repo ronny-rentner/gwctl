@@ -71,6 +71,9 @@ gwctl move WINDOW_ID X Y
 
 # Check D-Bus connection status
 gwctl setup check-connection
+
+# Get instructions for installing the required extension
+gwctl setup install-extension
 ```
 
 ## Advanced Usage with jq
@@ -107,6 +110,27 @@ gwctl list | jq -r '.[] | select(.wm_class | contains("firefox")) | .id' | xargs
 gwctl --filter wm_class firefox --field id list | xargs -n 1 gwctl activate
 ```
 
+## Development
+
+To set up a development environment:
+
+1.  **Clone the repository**
+2.  **Create a virtual environment:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+3.  **Install development dependencies:**
+    ```bash
+    pip install -e .[dev,test]
+    ```
+4.  **Build the project:**
+    ```bash
+    python -m build
+    ```
+
 ## License
 
 MIT License
+
+```
