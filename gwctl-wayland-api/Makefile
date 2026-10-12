@@ -8,6 +8,7 @@ SCALE ?= 1
 TEXT_SCALE ?= 1.5
 
 TEST_ENV ?= $(PWD)/.test-env
+EXTENSION_FILES = extension.js main.js metadata.json
 
 .PHONY: all compile zip run test-install clean clean-env
 
@@ -18,7 +19,8 @@ compile:
 
 zip: compile
 	@echo ":: Creating extension bundle..."
-	@zip -qr $(ZIP_NAME) extension.js metadata.json
+	@# Package every runtime module so the installed extension can resolve the entry shim import.
+	@zip -qr $(ZIP_NAME) $(EXTENSION_FILES)
 
 run: compile
 	@echo "Running in persistent home: $(TEST_ENV)"
@@ -31,9 +33,10 @@ run: compile
 	do \
 		ln -sf /dev/null $(TEST_ENV)/config/systemd/user/$$svc; \
 	done; \
-	rm -rf $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
-	mkdir -p $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
-	cp extension.js metadata.json $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
+		rm -rf $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
+		mkdir -p $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
+		# Copy every runtime module into the test environment so the shell can load main.js from extension.js.
+		cp $(EXTENSION_FILES) $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
 	XDG_DATA_HOME=$(TEST_ENV)/data \
 	XDG_CONFIG_HOME=$(TEST_ENV)/config \
 	XDG_RUNTIME_DIR=$(TEST_ENV)/runtime \
