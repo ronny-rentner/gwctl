@@ -167,15 +167,15 @@ const MR_DBUS_IFACE = `
       </method>
       <method name="Type">
          <arg type="s" direction="in" name="text">
-            <annotation name="Description" value="Text to insert or display provisionally." />
+            <annotation name="Description" value="Text to insert." />
          </arg>
          <arg type="b" direction="in" name="preedit">
-            <annotation name="Description" value="Show replaceable provisional text; an empty string clears it." />
+            <annotation name="Description" value="Insert text in preedit mode which allows replacing the text." />
          </arg>
          <arg type="b" direction="in" name="clear">
-            <annotation name="Description" value="Clear preedit on input reset instead of committing it; only applies when preedit is true." />
+            <annotation name="Description" value="Clear preedit text on input reset." />
          </arg>
-         <annotation name="Description" value="Insert final text, or show provisional text when preedit is true." />
+         <annotation name="Description" value="Insert text into the focussed application." />
       </method>
    </interface>
 </node>

@@ -1,0 +1,30 @@
+TODO: Optional OSD settings through D-Bus and the dynamic gwctl wrapper
+
+The OSD duration is currently a required argument. Callers should be able to
+omit it and get 5000 ms, or explicitly choose another duration.
+
+Proposed D-Bus interface: ShowOSD(text, icon, options), with options of type a{sv}.
+An empty dictionary uses the default; duration_ms overrides it.
+D-Bus still requires the dictionary argument. The Python wrapper must supply
+an empty dictionary when the caller omits options.
+
+Desired CLI:
+  gwctl showosd "Settings changed" audio-input-microphone-symbolic
+  gwctl showosd "Settings changed" audio-input-microphone-symbolic --duration-ms 8000
+
+Keep command generation generic. Do not hardcode ShowOSD, duration_ms, or other
+individual methods/options in src/gwctl.py. Ordinary D-Bus introspection exposes
+the dictionary type but not its allowed keys, types, or defaults. Resolve how
+that information reaches the wrapper before implementing automatic CLI flags.
+Do not introduce custom annotations or a gwctl-specific convention without agreement.
+
+Current state, 2026-10-12:
+  main.js declares ShowOSD(text, icon, duration_ms), signature ssu.
+  The loaded desktop extension still accepts only text and icon, signature ss.
+  record-vad-modes.py temporarily sends only those two arguments.
+  GNOME caches the extension module until a new session; changing files or
+  toggling the extension does not load the new implementation.
+
+Verify omitted and explicit durations from both Python and CLI, including
+conversion to a correctly typed D-Bus dictionary. Coordinate the recorder call
+and extension activation so the signature change does not break live recording.
