@@ -76,6 +76,32 @@ gwctl setup check-connection
 gwctl setup install-extension
 ```
 
+## Python Usage
+
+Construct `GnomeWindowControl` directly to connect to D-Bus and discover the available methods:
+
+```python
+import json
+from gwctl import GnomeWindowControl
+
+control = GnomeWindowControl()
+windows = json.loads(control.list())
+control.move(winid=123, x=100, y=100)
+```
+
+Method names are lowercase D-Bus method names. Pass all input arguments by keyword, using their D-Bus names
+and Python types; boolean arguments must be supplied explicitly. `control.methods` lists the available
+methods and their argument definitions. JSON results are returned as strings.
+
+Constructor options work from Python too:
+
+```python
+control = GnomeWindowControl(filter=[('wm_class', 'firefox')], field='id')
+print(control.list())
+```
+
+These calls run in the current Python process without command-line parsing or a Click context.
+
 ## Advanced Usage with jq
 
 The `list` command outputs JSON data that can be piped to `jq` for filtering and formatting:

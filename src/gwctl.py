@@ -7,6 +7,7 @@ import subprocess
 import os
 import xml.etree.ElementTree as ET
 import importlib.metadata
+from types import MethodType
 import ultraclick as click
 
 # DBus constants
@@ -125,7 +126,7 @@ class SetupCommand:
 
 
 def create_method_command(method_name, details):
-    """Create a Click command that invokes a D-Bus method."""
+    """Define a D-Bus method with pending CLI decorators."""
 
     @click.command(name=method_name.lower())
     def method_command(self, **kwargs):
@@ -154,7 +155,7 @@ def create_method_command(method_name, details):
 
         method_command = click.argument(name, type=click_type)(method_command)
 
-    method_command.help = help_text
+    method_command.__doc__ = help_text
     return method_command
 
 class GnomeWindowControl:
@@ -253,7 +254,7 @@ class GnomeWindowControl:
                 for method_name, details in methods.items():
                     cmd_name = method_name.lower()
                     cmd = create_method_command(method_name, details)
-                    setattr(self, cmd_name, cmd)
+                    setattr(self, cmd_name, MethodType(cmd, self))
                 
                 break
             except Exception as e:
@@ -308,12 +309,7 @@ class GnomeWindowControl:
         args = [kwargs[name] for name, type_code, desc in self.methods[method_name]['in_args']]
 
         # Dynamically invoke the method with positional arguments
-        try:
-            result = getattr(iface, method_name)(*args)
-        except dbus.exceptions.DBusException as e:
-            error_msg = f"Error calling '{method_name}': {str(e)}"
-            click.output.error(error_msg)
-            sys.exit(1)
+        result = getattr(iface, method_name)(*args)
 
         # If result is a tuple with one element, unwrap it
         if isinstance(result, (list, tuple)) and len(result) == 1:
@@ -366,7 +362,11 @@ class GnomeWindowControl:
 def main():
     """Entry point for the application when installed as a package."""
     # Run CLI with this context
-    click.group_from_class(GnomeWindowControl, name="gwctl")()
+    try:
+        click.group_from_class(GnomeWindowControl, name="gwctl")()
+    except dbus.exceptions.DBusException as error:
+        click.output.error(str(error))
+        sys.exit(1)
 
 if __name__ == "__main__":
     # For direct script execution
