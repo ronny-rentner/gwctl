@@ -1,9 +1,10 @@
 # Runs a GNOME Shell with the extension package given as the first argument, isolated in its own XDG directories and
 # session bus, so it cannot touch the desktop's files or settings. They live in the directory given as the second
-# argument, by default build/preview in the current directory. Further arguments go to gnome-shell.
+# argument, by default build/preview in the current directory. Further arguments go to gnome-shell, by default
+# --wayland --devkit; a leading --reset-settings first resets the sandbox's settings to their defaults.
 set -e
 
-zip=$(realpath "${1:?Usage: shell-session.sh ZIP [DIR [gnome-shell options]]}")
+zip=$(realpath "${1:?Usage: shell-session.sh ZIP [DIR [--reset-settings] [gnome-shell options]]}")
 dir=$(realpath -m "${2:-build/preview}")
 shift
 [ $# -eq 0 ] || shift
@@ -20,9 +21,9 @@ export XDG_STATE_HOME="$dir/state"
 # Keeps the settings out of the desktop's dconf database: GSettings writes a keyfile under XDG_CONFIG_HOME itself, and
 # dconf gets an empty profile.
 export GSETTINGS_BACKEND=keyfile DCONF_PROFILE=/dev/null
-# The window appears on the desktop. The name of the desktop's Wayland socket is looked up in the runtime directory,
-# so it becomes a full path before the runtime directory changes.
-export WAYLAND_DISPLAY="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+# Remember the host system's Wayland socket for gnome-shell's window.
+host_wayland="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+unset WAYLAND_DISPLAY
 export XDG_RUNTIME_DIR="$dir/runtime"
 export GTK_A11Y=none
 export NO_AT_SPI_BUS_DIRECT_NAV=1
@@ -42,13 +43,22 @@ chmod 700 "$XDG_RUNTIME_DIR" "$XDG_RUNTIME_DIR/keyring"
 echo 'wireplumber.profiles = { policy = { hooks.device.routes.automute-alsa = disabled } }' \
 	> "$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d/no-automute.conf"
 
-# Everything that talks to the session bus. The first argument is the package, the rest go to gnome-shell.
+# The keyfile holds all of the sandbox's settings, so deleting it resets them to their defaults.
+if [ "$1" = --reset-settings ]; then
+	rm -f "$XDG_CONFIG_HOME/glib-2.0/settings/keyfile"
+	shift
+fi
+[ $# -gt 0 ] || set -- --wayland --devkit
+
+# Everything that talks to the session bus. The first argument is the package, the second the host system's Wayland socket,
+# the rest go to gnome-shell.
 run_session() {
 	#eval $(gnome-keyring-daemon --daemonize --components=secrets)
 
 	# --force replaces the copy installed by the last run.
 	uuid=$(gnome-extensions install --force --print-uuid "$1")
-	shift
+	host_wayland=$2
+	shift 2
 
 	gsettings set org.gnome.shell disable-extension-version-validation true
 	gsettings set org.gnome.shell enabled-extensions "['$uuid']"
@@ -57,17 +67,17 @@ run_session() {
 	gsettings set org.gnome.desktop.interface scaling-factor $SCALE
 	gsettings set org.gnome.desktop.interface text-scaling-factor $TEXT_SCALE
 
-	# gwctl-preview finds this session's bus through this file.
+	# Tools outside the session find its bus through this file.
 	echo "$DBUS_SESSION_BUS_ADDRESS" > "$XDG_RUNTIME_DIR/bus-address"
 	# pipewire does not end with the session bus, so it is stopped with the session.
 	trap 'kill $(jobs -p)' EXIT
 	pipewire --properties '{ module.rt = false }' &
 	wireplumber --profile policy &
 
-	gnome-shell --wayland --devkit "$@"
+	WAYLAND_DISPLAY="$host_wayland" gnome-shell "$@"
 }
 
 # The bus starts only now, after the XDG directories and the settings backend are set, because the services it starts
 # inherit them. The bash that dbus-run-session starts gets run_session through the environment.
 export -f run_session
-dbus-run-session -- bash -ec 'run_session "$@"' bash "$zip" "$@"
+dbus-run-session -- bash -ec 'run_session "$@"' bash "$zip" "$host_wayland" "$@"

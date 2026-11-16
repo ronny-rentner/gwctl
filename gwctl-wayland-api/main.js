@@ -460,6 +460,8 @@ export default class Extension {
       inputMethod.set_preedit_text(text === '' ? null : text, cursor, cursor,
         clear ? Clutter.PreeditResetMode.CLEAR : Clutter.PreeditResetMode.COMMIT);
     } else {
+      // A commit should replace the preview, but Mutter 50.5 sends its stored preview again right after the commit, in
+      // the same text-input "done". Clearing the stored preview first prevents it.
       inputMethod.set_preedit_text(null, 0, 0, Clutter.PreeditResetMode.CLEAR);
       inputMethod.commit(text);
     }
