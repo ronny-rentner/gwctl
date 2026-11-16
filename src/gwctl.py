@@ -7,6 +7,7 @@ import subprocess
 import os
 import xml.etree.ElementTree as ET
 import importlib.metadata
+from functools import partial
 from types import MethodType
 import ultraclick as click
 
@@ -128,9 +129,13 @@ class SetupCommand:
 def create_method_command(method_name, details):
     """Define a D-Bus method with pending CLI decorators."""
 
-    @click.command(name=method_name.lower())
     def method_command(self, **kwargs):
         return self._call_dbus_method(method_name, **kwargs)
+
+    method_command = partial(method_command, **{
+        name: default for name, type_code, desc, default in details.get('in_args', []) if default is not None
+    })
+    method_command = click.command(name=method_name.lower())(method_command)
 
     # Set callback name to match the command name for ultraclick
     #method_command.callback.__name__ = method_name.lower()
@@ -138,12 +143,14 @@ def create_method_command(method_name, details):
     help_text = details.get('desc', f"Call the {method_name} D-Bus method.")
 
     # Process arguments
-    for name, type_code, desc in details.get('in_args', []):
+    for name, type_code, desc, default in details.get('in_args', []):
         if type_code == 'b':
-            method_command = click.option(f'--{name}', name, is_flag=True, help=desc)(method_command)
+            if default is not None:
+                # The flag name and active value depend on the boolean default.
+                method_command = click.option(f'--{"no-" if default else ""}{name}', name, is_flag=True, flag_value=not default, default=default, help=desc)(method_command)
+            else:
+                method_command = click.option(f'--{name}', name, is_flag=True, help=desc)(method_command)
             continue
-
-        help_text += f"\n\n{name.upper()}  {desc}\n"
 
         # Map D-Bus type to Click type
         if type_code in ['i', 'u', 'x', 't']:
@@ -153,7 +160,12 @@ def create_method_command(method_name, details):
         else:
             click_type = click.STRING
 
-        method_command = click.argument(name, type=click_type)(method_command)
+        if default is not None:
+            method_command = click.option(f'--{name.replace("_", "-")}', name, type=click_type, default=default, help=desc)(method_command)
+        else:
+            help_text += f"\n\n{name.upper()}  {desc}\n"
+            # A D-Bus array takes all remaining command line arguments.
+            method_command = click.argument(name, type=click_type, nargs=-1 if type_code.startswith('a') else 1)(method_command)
 
     method_command.__doc__ = help_text
     return method_command
@@ -173,8 +185,9 @@ class GnomeWindowControl:
         Parse D-Bus introspection XML and extract method information.
         Returns a dictionary mapping method names to their details:
           - 'desc': method description
-          - 'in_args': input arguments as (name, type, description) tuples
-          - 'out_args': output arguments as (name, type, description) tuples
+          - 'in_args': input arguments as (name, type, description, default) tuples
+          - 'out_args': output arguments as (name, type, description, default) tuples
+        An absent default is None.
         """
         root = ET.fromstring(xml_str)
         iface_elem = None
@@ -200,12 +213,20 @@ class GnomeWindowControl:
             out_args = []
             for arg in method.findall('arg'):
                 arg_desc = ''
+                arg_default = None
                 for anno in arg.findall('annotation'):
                     if anno.get('name') == 'Description':
                         arg_desc = anno.get('value')
-                        break
+                    elif anno.get('name') == 'Default':
+                        arg_default = anno.get('value')
+                        if arg.get('type') in ['i', 'u', 'x', 't']:
+                            arg_default = int(arg_default)
+                        elif arg.get('type') == 'd':
+                            arg_default = float(arg_default)
+                        elif arg.get('type') == 'b':
+                            arg_default = click.BOOL.convert(arg_default, None, None)
 
-                arg_tuple = (arg.get('name'), arg.get('type'), arg_desc)
+                arg_tuple = (arg.get('name'), arg.get('type'), arg_desc, arg_default)
 
                 if arg.get('direction') == 'in':
                     in_args.append(arg_tuple)
@@ -306,7 +327,7 @@ class GnomeWindowControl:
         iface = self.meta['dbus_iface']
 
         # Look up each D-Bus input argument by name in kwargs to build the positional argument list.
-        args = [kwargs[name] for name, type_code, desc in self.methods[method_name]['in_args']]
+        args = [kwargs[name] for name, type_code, desc, default in self.methods[method_name]['in_args']]
 
         # Dynamically invoke the method with positional arguments
         result = getattr(iface, method_name)(*args)

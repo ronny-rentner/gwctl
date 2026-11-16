@@ -157,6 +157,6 @@ To set up a development environment:
 
 ## License
 
-MIT License
+GNU General Public License version 3 or later. See [LICENSE.txt](LICENSE.txt).
 
 ```

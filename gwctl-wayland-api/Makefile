@@ -1,16 +1,16 @@
 UUID = gwctl-wayland-api@kamuko.de
-NAME = Gnome Wayland API
-DOMAIN = kamuko.de
-ZIP_NAME = $(UUID).zip
+NAME = gwctl Wayland API
+ZIP = $(UUID).zip
 
-RES ?= 3200x1600
 SCALE ?= 1
-TEXT_SCALE ?= 1.5
+TEXT_SCALE ?= 1.25
 
-TEST_ENV ?= $(PWD)/.test-env
-EXTENSION_FILES = extension.js main.js metadata.json
+EXTENSION_FILES = extension.js main.js metadata.json export-keymap.js
 
-.PHONY: all compile zip run test-install clean clean-env
+# What shell-session.sh needs from here.
+export SCALE TEXT_SCALE
+
+.PHONY: all compile zip install preview clean clean-env
 
 all: compile zip
 
@@ -20,56 +20,20 @@ compile:
 zip: compile
 	@echo ":: Creating extension bundle..."
 	@# Package every runtime module so the installed extension can resolve the entry shim import.
-	@zip -qr $(ZIP_NAME) $(EXTENSION_FILES)
+	@zip -qr $(ZIP) $(EXTENSION_FILES)
 
-run: compile
-	@echo "Running in persistent home: $(TEST_ENV)"
-	@mkdir -p $(TEST_ENV)/data/gnome-shell/extensions
-	@mkdir -p $(TEST_ENV)/config/systemd/user
-	@# 1. Create the private runtime directory
-	@mkdir -p $(TEST_ENV)/runtime/keyring
-	@chmod 700 $(TEST_ENV)/runtime
-	@for svc in localsearch-3.service localsearch-extractor-3.service tracker-extract-3.service tracker-extract.service tracker-miner-apps.service tracker-miner-fs-3.service tracker-miner-fs.service tracker-miner-rss.service tracker-store.service tracker-writeback.service evolution-addressbook-factory.service evolution-calendar-factory.service evolution-source-registry.service evolution-user-prompter.service; \
-	do \
-		ln -sf /dev/null $(TEST_ENV)/config/systemd/user/$$svc; \
-	done; \
-		rm -rf $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
-		mkdir -p $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
-		# Copy every runtime module into the test environment so the shell can load main.js from extension.js.
-		cp $(EXTENSION_FILES) $(TEST_ENV)/data/gnome-shell/extensions/$(UUID); \
-	XDG_DATA_HOME=$(TEST_ENV)/data \
-	XDG_CONFIG_HOME=$(TEST_ENV)/config \
-	XDG_RUNTIME_DIR=$(TEST_ENV)/runtime \
-	dbus-run-session -- bash -c "\
-		eval \$$$(gnome-keyring-daemon --start --components=secrets); \
-		gsettings set org.gnome.shell disable-extension-version-validation true; \
-		gsettings set org.gnome.shell enabled-extensions \"['$(UUID)']\"; \
-		gsettings set org.gnome.desktop.search-providers disabled \"['org.gnome.Characters.desktop', 'org.gnome.font-viewer.desktop', 'org.gnome.Software.desktop', 'org.gnome.clocks.desktop']\"; \
-		export GTK_A11Y=none; \
-		export NO_AT_SPI_BUS_DIRECT_NAV=1; \
-		export GTK_USE_PORTAL=0; \
-		env MUTTER_DEBUG_DUMMY_MODE_SPECS=\"$(RES)\" MUTTER_DEBUG_DUMMY_MONITOR_SCALES=\"$(SCALE)\" gnome-shell --nested --wayland"
+install: zip
+	@echo ":: Installing extension..."
+	@gnome-extensions install --force "$(ZIP)"
+	@echo ":: Installed $(UUID). Log out and back in to load it."
 
-test-install: zip
-	@echo "Installing to persistent home: $(TEST_ENV)"
-	@mkdir -p $(TEST_ENV)/data $(TEST_ENV)/config/systemd/user
-	@for svc in localsearch-3.service localsearch-extractor-3.service tracker-extract-3.service tracker-extract.service tracker-miner-apps.service tracker-miner-fs-3.service tracker-miner-fs.service tracker-miner-rss.service tracker-store.service tracker-writeback.service evolution-addressbook-factory.service evolution-calendar-factory.service evolution-source-registry.service evolution-user-prompter.service; do \
-		ln -sf /dev/null $(TEST_ENV)/config/systemd/user/$$svc; \
-	done; \
-	XDG_DATA_HOME=$(TEST_ENV)/data XDG_CONFIG_HOME=$(TEST_ENV)/config gnome-extensions install --force $(ZIP_NAME); \
-	XDG_DATA_HOME=$(TEST_ENV)/data XDG_CONFIG_HOME=$(TEST_ENV)/config dbus-run-session -- bash -c \
-		"\
-			gsettings set org.gnome.shell disable-extension-version-validation true; \
-			gsettings set org.gnome.shell enabled-extensions \"['$(UUID)']\"; \
-			gsettings set org.gnome.desktop.interface text-scaling-factor $(TEXT_SCALE); \
-			gsettings set org.gnome.desktop.search-providers disabled \"['org.gnome.Characters.desktop', 'org.gnome.font-viewer.desktop', 'org.gnome.Software.desktop', 'org.gnome.clocks.desktop']\"; \
-			export GTK_A11Y=none; \
-			export NO_AT_SPI_BUS_DIRECT_NAV=1; \
-			export GTK_USE_PORTAL=0; \
-			env MUTTER_DEBUG_DUMMY_MODE_SPECS=\"$(RES)\" MUTTER_DEBUG_DUMMY_MONITOR_SCALES=\"$(SCALE)\" gnome-shell --nested --wayland"
+# A Shell in a window, with the extension. Its settings are under build/preview and are kept between runs.
+preview: zip
+	@bash shell-session.sh "$(ZIP)"
 
+# What the preview Shell keeps: its settings and its copy of the extension.
 clean-env:
-	rm -rf $(TEST_ENV)
+	rm -rf build/preview
 
 clean:
-	rm -f $(ZIP_NAME)
+	rm -f $(ZIP)

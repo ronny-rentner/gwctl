@@ -20,6 +20,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {getKeyboardManager} from 'resource:///org/gnome/shell/misc/keyboardManager.js';
 
 const MR_DBUS_IFACE = `
 <node>
@@ -159,9 +160,11 @@ const MR_DBUS_IFACE = `
          </arg>
          <arg type="s" direction="in" name="icon">
             <annotation name="Description" value="Icon name for the on-screen display." />
+            <annotation name="Default" value="dialog-information-symbolic" />
          </arg>
          <arg type="u" direction="in" name="duration_ms">
             <annotation name="Description" value="Display duration in milliseconds." />
+            <annotation name="Default" value="5000" />
          </arg>
          <annotation name="Description" value="Show a temporary GNOME on-screen display without taking focus." />
       </method>
@@ -177,15 +180,43 @@ const MR_DBUS_IFACE = `
          </arg>
          <annotation name="Description" value="Insert text into the focussed application." />
       </method>
+      <method name="Key">
+         <arg type="as" direction="in" name="keys">
+            <annotation name="Description" value="Keys in the order to send, in GNOME accelerator format: a key symbol name or a keycode as hex, with modifiers in front, e.g. Return, &lt;Control&gt;a or 0x24." />
+         </arg>
+         <annotation name="Description" value="Press and release keys one after another in the focussed application." />
+      </method>
    </interface>
 </node>
 `;
+
+// Modifier names of the GNOME accelerator format.
+const MODIFIERS = {
+  primary: Clutter.ModifierType.CONTROL_MASK,
+  control: Clutter.ModifierType.CONTROL_MASK,
+  ctrl: Clutter.ModifierType.CONTROL_MASK,
+  ctl: Clutter.ModifierType.CONTROL_MASK,
+  shift: Clutter.ModifierType.SHIFT_MASK,
+  shft: Clutter.ModifierType.SHIFT_MASK,
+  alt: Clutter.ModifierType.MOD1_MASK,
+  mod1: Clutter.ModifierType.MOD1_MASK,
+  mod2: Clutter.ModifierType.MOD2_MASK,
+  mod3: Clutter.ModifierType.MOD3_MASK,
+  mod4: Clutter.ModifierType.MOD4_MASK,
+  mod5: Clutter.ModifierType.MOD5_MASK,
+  meta: Clutter.ModifierType.META_MASK,
+  hyper: Clutter.ModifierType.HYPER_MASK,
+  super: Clutter.ModifierType.SUPER_MASK,
+};
 
 export default class Extension {
   enable() {
     // Keep D-Bus export setup with the implementation so the entry shim stays trivial.
     this._dbus = Gio.DBusExportedObject.wrapJSObject(MR_DBUS_IFACE, this);
     this._dbus.export(Gio.DBus.session, '/org/gnome/Shell/Extensions/gwctlAPI');
+    // The exporter needs Gdk, which must not be loaded into the shell, so it runs as a process of its own.
+    const dir = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
+    Gio.Subprocess.new(['gjs', '-m', GLib.build_filenamev([dir, 'export-keymap.js'])], Gio.SubprocessFlags.NONE);
     // Disabled noisy lifecycle debug log.
     // log('This is a debug message (enable).');
   }
@@ -431,6 +462,39 @@ export default class Extension {
     } else {
       inputMethod.set_preedit_text(null, 0, 0, Clutter.PreeditResetMode.CLEAR);
       inputMethod.commit(text);
+    }
+  }
+
+  Key(keys) {
+    const keymapFile = `${GLib.get_user_cache_dir()}/gwctl-wayland-api-keymap.json`;
+    if (!this._keymap && GLib.file_test(keymapFile, GLib.FileTest.EXISTS)) {
+      this._keymap = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(keymapFile)[1]));
+    }
+    const symbols = this._keymap?.groups[getKeyboardManager().currentLayout.groupIndex] ?? {};
+    // Resolve every key first so an unknown one fails before anything is sent.
+    const combos = keys.map(key => {
+      let state = 0;
+      const name = key.replace(/<(\w+)>/g, (tag, modifier) => {
+        state |= MODIFIERS[modifier.toLowerCase()];
+        return '';
+      });
+      if (/^0x[0-9a-f]+$/i.test(name)) {
+        return [0, parseInt(name, 16), state];
+      }
+      // GNOME accelerators ignore case and the XF86 prefix; of names differing only by case, the lower-case one wins.
+      const wanted = name.toLowerCase().replace(/^xf86/, '');
+      const symbol = Object.keys(symbols).filter(s => s.toLowerCase() === wanted).sort().at(-1);
+      if (!symbol) {
+        throw new Error(`Unknown key: ${key}`);
+      }
+      const [keyval, keycode, modifiers] = symbols[symbol];
+      return [keyval, keycode, state | modifiers];
+    });
+    const inputMethod = global.stage.context.get_backend().get_input_method();
+    for (const [keyval, keycode, state] of combos) {
+      // forward_key() takes the time of the event in microseconds.
+      inputMethod.forward_key(keyval, keycode, state, GLib.get_monotonic_time(), true);
+      inputMethod.forward_key(keyval, keycode, state, GLib.get_monotonic_time(), false);
     }
   }
 }
