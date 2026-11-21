@@ -9,6 +9,10 @@ import xml.etree.ElementTree as ET
 import importlib.metadata
 from functools import partial
 from types import MethodType
+import rich.console
+import rich.highlighter
+import rich.table
+import rich.text
 import ultraclick as click
 
 # DBus constants
@@ -17,6 +21,67 @@ DEFAULT_INTERFACES = [
     'org.gnome.Shell.Extensions.gwctlAPI',
     'org.gnome.Shell.Extensions.Windows'
 ]
+
+# Click's parameter types read a filter value as the type of the field it is compared with, e.g. on or 1 as True.
+FILTER_TYPES = {bool: click.BOOL, int: click.INT, str: click.STRING}
+
+def matches(value, text):
+    """Tells whether a field value equals the filter text, read the way Click reads the value's type, e.g. on as True."""
+    return value == FILTER_TYPES[type(value)].convert(text, None, None)
+
+def check_fields(entries, names):
+    """Raises an error naming the fields that no entry has. Without entries, there is nothing to check against."""
+    known = {key for entry in entries for key in entry}
+    unknown = [name for name in names if name not in known]
+    if entries and unknown:
+        raise click.ClickException(f"Unknown field: {', '.join(unknown)}")
+
+class JsonDataFormatter(type(click.output)):
+    """Prints lists and dicts, the extension's data, as indented JSON and everything else as text."""
+
+    def result(self, value):
+        if isinstance(value, (list, dict)):
+            click.echo(json.dumps(value, indent=2))
+        else:
+            super().result(value)
+
+class PrettyDataFormatter(type(click.output)):
+    """Prints lists of dicts and dicts, the extension's data, as tables with rich, and everything else as text."""
+
+    def result(self, value):
+        if isinstance(value, list):
+            keys = list(value[0])[:self.max_columns] if value else []
+            table = rich.table.Table(*keys)
+            for item in value:
+                table.add_row(*(self._cell(item[key]) for key in keys))
+            rich.console.Console().print(table)
+        elif isinstance(value, dict):
+            table = rich.table.Table(show_header=False)
+            for key, item in value.items():
+                table.add_row(key, self._cell(item))
+            rich.console.Console().print(table)
+        else:
+            super().result(value)
+
+    def _cell(self, value):
+        # Strings show as they are, without Rich markup; other values in their JSON spelling, highlighted by type.
+        if isinstance(value, str):
+            return rich.text.Text(value)
+        return rich.highlighter.JSONHighlighter()(json.dumps(value))
+
+def plain(value):
+    """Converts dbus-python values, such as dbus.Boolean or dbus.String, into the plain Python types they stand for."""
+    if isinstance(value, dbus.Boolean):
+        return bool(value)
+    if isinstance(value, dict):
+        return {str(key): plain(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [plain(item) for item in value]
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, int):
+        return int(value)
+    return value
 
 def iface_to_path(iface):
     """Derive DBus object path from interface name."""
@@ -44,7 +109,7 @@ class SetupCommand:
             click.output.headline("GNOME Wayland Extension Required")
             click.output.warning("No extension package (*.shell-extension.zip) found locally.\n")
             click.output.info(
-                "This tool requires the 'Gnome Wayland API' extension to function.\n"
+                "This tool requires the 'gwctl API' extension to function.\n"
                 "You can install it manually from the GNOME Extensions website:\n"
             )
             
@@ -291,8 +356,17 @@ class GnomeWindowControl:
     @click.option("--verbose", is_flag=True, help="Enable verbose output")
     @click.option("--interface", help="Specify the D-Bus interface name")
     @click.option("--filter", nargs=2, is_eager=True, multiple=True, help="Filter JSON output by field and value (e.g., --filter wm_class firefox)")
-    @click.option("--field", help="Extract only the specified field from results (e.g., --field id)")
-    def __init__(self, verbose=False, interface=None, filter=None, field=None):
+    @click.option("--field", multiple=True, help="Extract only the specified field from results (e.g., --field id); repeatable")
+    @click.option("--json/--no-json", "json_output", help="Print results as JSON; by default only in plain text output, such as a pipe")
+    @click.option("--max-columns", type=int, help="Maximum number of columns in tables, which show results without --json")
+    def __init__(self, verbose=False, interface=None, filter=None, field=None, json_output=None, max_columns=8):
+        print_json = click.output.plain if json_output is None else json_output
+        if print_json:
+            click.use_formatter(JsonDataFormatter)
+        else:
+            click.use_formatter(PrettyDataFormatter)
+            click.output.max_columns = max_columns
+
         self.verbose = verbose
         self.interface = interface
         self.filter = filter
@@ -305,6 +379,7 @@ class GnomeWindowControl:
         self.meta['interface'] = interface
         self.meta['filter'] = filter
         self.meta['field'] = field
+        self.meta['json'] = json_output
 
         if verbose:
             iface_name = self.meta.get('iface_name', 'Unknown')
@@ -315,7 +390,7 @@ class GnomeWindowControl:
                 filters_str = ", ".join([f"{f[0]}={f[1]}" for f in filter])
                 click.output.info(f"Filtering results: {filters_str}")
             if field:
-                click.output.info(f"Extracting field: {field}")
+                click.output.info(f"Extracting fields: {', '.join(field)}")
 
     @property
     def methods(self):
@@ -333,33 +408,32 @@ class GnomeWindowControl:
         result = getattr(iface, method_name)(*args)
 
         # If result is a tuple with one element, unwrap it
-        if isinstance(result, (list, tuple)) and len(result) == 1:
+        if isinstance(result, tuple) and len(result) == 1:
             result = result[0]
 
         # Filter out None results
         if result is None:
             return
 
-        if isinstance(result, str):
-            try:
-                parsed = json.loads(result)
-                
-                # Apply filters if present
-                filters = self.meta.get('filter')
-                if filters and isinstance(parsed, list):
-                    # Apply each filter criteria
-                    for field, value in filters:
-                        parsed = [item for item in parsed if field in item and str(item[field]) == value]
-                
-                # Extract specific field if requested
-                field = self.meta.get('field')
-                if field and isinstance(parsed, list):
-                    # Print one value per line for easy piping
-                    return "\n".join(str(item.get(field, "")) for item in parsed)
-                    
-                return json.dumps(parsed, indent=2)
-            except Exception:
-                pass
+        result = plain(result)
+
+        # Apply filters if present
+        filters = self.meta.get('filter')
+        if filters and isinstance(result, list):
+            check_fields(result, [field for field, value in filters])
+            # Apply each filter criteria
+            for field, value in filters:
+                result = [item for item in result if matches(item[field], value)]
+
+        # Extract specific fields if requested
+        fields = self.meta.get('field')
+        if fields and isinstance(result, list):
+            check_fields(result, fields)
+            # Only an explicit --json gives the fields as JSON; by default they stay lines that tools like xargs read.
+            if self.meta.get('json'):
+                return [{name: item[name] for name in fields} for item in result]
+            # Print one line per entry, its fields separated by tabs, for easy piping
+            return "\n".join("\t".join(str(item[name]) for name in fields) for item in result)
 
         return result
 

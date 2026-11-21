@@ -29,7 +29,8 @@ classifiers = [
 ]
 dependencies = [
   "ultraclick @ git+https://github.com/ronny-rentner/ultraclick.git",
-  "dbus-python >= 1.4.0"
+  "dbus-python >= 1.4.0",
+  "rich"
 ]
 
 [project.optional-dependencies]

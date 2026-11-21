@@ -1,5 +1,5 @@
 UUID = gwctl-wayland-api@kamuko.de
-NAME = gwctl Wayland API
+NAME = gwctl API
 ZIP = $(UUID).zip
 
 SCALE ?= 1
@@ -15,7 +15,7 @@ export SCALE TEXT_SCALE
 all: compile zip
 
 compile:
-	@echo ":: No compilation needed for this extension."
+	@#echo ":: No compilation needed for this extension."
 
 zip: compile
 	@echo ":: Creating extension bundle..."
@@ -31,10 +31,13 @@ install: zip
 preview: zip
 	@bash shell-session.sh "$(ZIP)"
 
-# Checks what Type leaves in real applications, in a Shell without a screen.
+# Run automated tests in headless shell
 test-shell: zip
+	@mkdir -p "$(CURDIR)/build/$@"
 	@bash shell-session.sh "$(ZIP)" "$(CURDIR)/build/$@" --reset-settings \
-		--wayland --headless --virtual-monitor 1920x1080 --automation-script tests/type.test.js
+		--wayland --headless --virtual-monitor 1920x1080 --automation-script tests/extension.test.js \
+		2> "$(CURDIR)/build/$@/session.log" \
+		|| { grep 'Script failed' "$(CURDIR)/build/$@/session.log"; echo "Log: build/$@/session.log"; exit 1; }
 
 # What the preview Shell keeps: its settings and its copy of the extension.
 clean-env:

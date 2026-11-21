@@ -1,6 +1,8 @@
 # GNOME Wayland Window Control (gwctl)
 
 A command-line interface for controlling GNOME Wayland windows through D-Bus.
+gwctl lists, moves, resizes, focuses and closes windows on GNOME under Wayland, from the command line, from Python and
+over D-Bus.
 
 ## Features
 
@@ -9,19 +11,29 @@ A command-line interface for controlling GNOME Wayland windows through D-Bus.
 - Dynamic command generation based on available D-Bus methods
 - Easy to use command-line interface
 
+## How it works
+
+gwctl comes in two parts. A GNOME Shell extension runs inside GNOME Shell, which manages all windows under Wayland,
+and exposes window functions over D-Bus. The `gwctl` command calls these functions.
+
 ## Installation
 
 ```bash
-pip install gwctl
+git clone https://github.com/ronny-rentner/gwctl.git
+cd gwctl
+pip install .
+
+# Install and enable the extension
+gwctl setup install-extension
 ```
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - GNOME Shell with Wayland
 - D-Bus (dbus-python)
 - UltraClick
-- 'Windows D-Bus Interface' GNOME Shell extension
+- The 'gwctl API' GNOME Shell extension from this repository
 
 ### Optional
 - [jq](https://jqlang.github.io/jq/) - for advanced filtering and formatting of JSON output
@@ -81,22 +93,21 @@ gwctl setup install-extension
 Construct `GnomeWindowControl` directly to connect to D-Bus and discover the available methods:
 
 ```python
-import json
 from gwctl import GnomeWindowControl
 
 control = GnomeWindowControl()
-windows = json.loads(control.list())
+windows = control.list()
 control.move(winid=123, x=100, y=100)
 ```
 
 Method names are lowercase D-Bus method names. Pass all input arguments by keyword, using their D-Bus names
 and Python types; boolean arguments must be supplied explicitly. `control.methods` lists the available
-methods and their argument definitions. JSON results are returned as strings.
+methods and their argument definitions.
 
 Constructor options work from Python too:
 
 ```python
-control = GnomeWindowControl(filter=[('wm_class', 'firefox')], field='id')
+control = GnomeWindowControl(filter=[('wm_class', 'firefox')], field=['id'])
 print(control.list())
 ```
 
@@ -154,6 +165,26 @@ To set up a development environment:
     ```bash
     python -m build
     ```
+
+### Trying the extension
+
+The extension can run in a GNOME Shell of its own, isolated from your session. This needs GNOME Shell 49 or later with
+Mutter's development kit. In `gwctl-wayland-api/`:
+
+```bash
+# GNOME Shell with the extension in a window; its state is kept in build/preview
+make preview
+# Delete the preview's state
+make clean-env
+# Run automated tests in a headless GNOME Shell
+make test-shell
+```
+
+While the preview runs, `gwctl-preview` in the repository root runs gwctl against it instead of your session:
+
+```bash
+./gwctl-preview key h i Return
+```
 
 ## License
 

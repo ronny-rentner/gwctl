@@ -1,5 +1,5 @@
 {
-  "name": "Gnome Wayland API",
+  "name": "gwctl API",
   "description": "Adds DBus API calls for gwctl (Gnome Wayland/Window Control)",
   "uuid": "gwctl-wayland-api@kamuko.de",
   "shell-version": [

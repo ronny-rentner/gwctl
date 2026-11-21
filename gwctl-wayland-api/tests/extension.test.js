@@ -1,4 +1,4 @@
-// Runs inside a headless Shell and checks what the extension's Type method leaves in real applications.
+// Runs inside a headless Shell and checks the extension's methods in real applications.
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GioUnix from 'gi://GioUnix';
@@ -90,6 +90,11 @@ const cases = [
     ['4 empty commit', {preview: 'five', commit: '', expected: 'onetwothreefour'}],
 ];
 
+// Returns what a list method of the extension sends over D-Bus, unpacked as a D-Bus caller receives it.
+function list(method) {
+    return new GLib.Variant('aa{sv}', extension[method]()).recursiveUnpack();
+}
+
 function findWindow(app) {
     return global.get_window_actors().map(actor => actor.meta_window)
         .find(window => window.get_wm_class() === app.wmClass);
@@ -139,4 +144,22 @@ export async function run() {
             print(`PASS ${app.name} ${name}`);
         }
     }
+
+    const [editor, terminal] = apps.map(findWindow);
+    extension.MoveToWorkspace(editor.get_id(), 1);
+    const workspaces = new Map(list('List').map(window => [window.id, window.workspace]));
+    equal(workspaces.get(editor.get_id()), 1, 'List workspace of a moved window');
+    equal(workspaces.get(terminal.get_id()), 0, 'List workspace of a window left on the first workspace');
+    extension.Stick(terminal.get_id());
+    const sticky = list('List').find(window => window.id === terminal.get_id());
+    equal(sticky.workspace, -1, 'List workspace of a stuck window');
+    extension.Unstick(terminal.get_id());
+    const unstuck = list('List').find(window => window.id === terminal.get_id());
+    equal(unstuck.workspace, 0, 'List workspace of an unstuck window, the active workspace');
+    print('PASS List workspace');
+
+    new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'}).set_strv('workspace-names', ['Mail']);
+    await waitFor(() => list('ListWorkspaces')[0].name === 'Mail', 'ListWorkspaces reports the name of workspace 0');
+    equal(list('ListWorkspaces')[1].index, 1, 'ListWorkspaces index of the second workspace');
+    print('PASS ListWorkspaces');
 }

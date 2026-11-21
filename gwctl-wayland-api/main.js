@@ -19,26 +19,33 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {getKeyboardManager} from 'resource:///org/gnome/shell/misc/keyboardManager.js';
 
-const MR_DBUS_IFACE = `
+const DBUS_INTERFACE = `
 <node>
    <interface name="org.gnome.Shell.Extensions.gwctlAPI">
       <method name="List">
-         <arg type="s" direction="out" name="win">
-            <annotation name="Description" value="Returns a JSON string representing an array of windows." />
+         <arg type="aa{sv}" direction="out" name="windows">
+            <annotation name="Description" value="One dictionary of properties per window." />
          </arg>
-         <annotation name="Description" value="Lists all windows and returns their properties as a JSON string." />
+         <annotation name="Description" value="Lists all windows and returns their properties." />
+      </method>
+      <method name="ListWorkspaces">
+         <arg type="aa{sv}" direction="out" name="workspaces">
+            <annotation name="Description" value="One dictionary with index and name per workspace." />
+         </arg>
+         <annotation name="Description" value="Lists all workspaces with their index and name." />
       </method>
       <method name="Details">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to get details for." />
          </arg>
-         <arg type="s" direction="out" name="win">
-            <annotation name="Description" value="Returns a JSON string with detailed information about the specified window." />
+         <arg type="a{sv}" direction="out" name="details">
+            <annotation name="Description" value="A dictionary with detailed information about the specified window." />
          </arg>
-         <annotation name="Description" value="Returns detailed information about a specific window (by winid) as a JSON string." />
+         <annotation name="Description" value="Returns detailed information about a specific window (by winid)." />
       </method>
       <method name="GetTitle">
          <arg type="u" direction="in" name="winid">
@@ -51,21 +58,21 @@ const MR_DBUS_IFACE = `
       </method>
       <method name="GetFrameRect">
          <arg type="u" direction="in" name="winid">
-            <annotation name="Description" value="The ID of the window whose frame rectangle is to be retrieved." />
+            <annotation name="Description" value="The ID of the window." />
          </arg>
-         <arg type="s" direction="out" name="frameRect">
-            <annotation name="Description" value="Returns a JSON string with the frame rectangle (x, y, width, height) of the window." />
+         <arg type="a{sv}" direction="out" name="frameRect">
+            <annotation name="Description" value="x, y, width and height of the window's visible edges." />
          </arg>
-         <annotation name="Description" value="Returns the frame rectangle of the window as a JSON string." />
+         <annotation name="Description" value="Returns the position and size of the window's visible edges. A shadow the application draws around the window is not included." />
       </method>
-      <method name="GetFrameBounds">
+      <method name="GetBufferRect">
          <arg type="u" direction="in" name="winid">
-            <annotation name="Description" value="The ID of the window whose frame bounds are to be retrieved." />
+            <annotation name="Description" value="The ID of the window." />
          </arg>
-         <arg type="s" direction="out" name="frameBounds">
-            <annotation name="Description" value="Returns a JSON string representing the frame bounds (outer geometry) of the window." />
+         <arg type="a{sv}" direction="out" name="bufferRect">
+            <annotation name="Description" value="x, y, width and height of the area the window's pixels cover." />
          </arg>
-         <annotation name="Description" value="Returns the frame bounds of the window as a JSON string." />
+         <annotation name="Description" value="Returns the position and size of the area the window's pixels cover. This includes a shadow the application draws around the window, so it can be larger than the frame rectangle." />
       </method>
       <method name="MoveToWorkspace">
          <arg type="u" direction="in" name="winid">
@@ -75,6 +82,18 @@ const MR_DBUS_IFACE = `
             <annotation name="Description" value="The target workspace number to move the window to." />
          </arg>
          <annotation name="Description" value="Moves the specified window to a given workspace number." />
+      </method>
+      <method name="Stick">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to show on all workspaces." />
+         </arg>
+         <annotation name="Description" value="Shows the specified window on all workspaces." />
+      </method>
+      <method name="Unstick">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to show on the active workspace only." />
+         </arg>
+         <annotation name="Description" value="Shows the specified window on the active workspace only." />
       </method>
       <method name="MoveResize">
          <arg type="u" direction="in" name="winid">
@@ -212,236 +231,157 @@ const MODIFIERS = {
 export default class Extension {
   enable() {
     // Keep D-Bus export setup with the implementation so the entry shim stays trivial.
-    this._dbus = Gio.DBusExportedObject.wrapJSObject(MR_DBUS_IFACE, this);
+    this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_INTERFACE, this);
     this._dbus.export(Gio.DBus.session, '/org/gnome/Shell/Extensions/gwctlAPI');
     // The exporter needs Gdk, which must not be loaded into the shell, so it runs as a process of its own.
     const dir = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
     Gio.Subprocess.new(['gjs', '-m', GLib.build_filenamev([dir, 'export-keymap.js'])], Gio.SubprocessFlags.NONE);
-    // Disabled noisy lifecycle debug log.
-    // log('This is a debug message (enable).');
   }
 
   disable() {
-    // Disabled noisy lifecycle debug log.
-    // log('This is a debug message (disable).');
     this._dbus.flush();
     this._dbus.unexport();
     delete this._dbus;
   }
 
-  _get_window_by_wid(winid) {
-    let win = global.get_window_actors().find(w => w.meta_window.get_id() == winid);
-    return win;
+  _findWindow(winid) {
+    const window = global.get_window_actors().map(actor => actor.meta_window).find(window => window.get_id() == winid);
+    if (!window) {
+      throw new Error('Not found');
+    }
+    return window;
+  }
+
+  _unmaximize(window) {
+    if (window.maximized_horizontally || window.maximized_vertically) {
+      window.unmaximize(Meta.MaximizeFlags.BOTH);
+    }
+  }
+
+  _rectInfo(rect) {
+    return {
+      x: GLib.Variant.new('i', rect.x),
+      y: GLib.Variant.new('i', rect.y),
+      width: GLib.Variant.new('i', rect.width),
+      height: GLib.Variant.new('i', rect.height),
+    };
+  }
+
+  _windowInfo(window) {
+    return {
+      id: GLib.Variant.new('t', window.get_id()),
+      title: GLib.Variant.new('s', window.get_title()),
+      // Mutter returns null for a missing WM_CLASS, and D-Bus has no null, so both its parts go out as empty strings.
+      wm_class: GLib.Variant.new('s', window.get_wm_class() ?? ''),
+      // -1 marks a window on all workspaces, as in wmctrl; get_workspace() would report the active workspace for it.
+      workspace: GLib.Variant.new('i', window.is_on_all_workspaces() ? -1 : window.get_workspace().index()),
+      monitor: GLib.Variant.new('i', window.get_monitor()),
+      in_current_workspace: GLib.Variant.new('b', window.located_on_workspace(global.workspace_manager.get_active_workspace())),
+      focus: GLib.Variant.new('b', window.has_focus()),
+      pid: GLib.Variant.new('i', window.get_pid()),
+      wm_class_instance: GLib.Variant.new('s', window.get_wm_class_instance() ?? ''),
+      ...this._rectInfo(window.get_frame_rect()),
+      moveable: GLib.Variant.new('b', window.allows_move()),
+      resizeable: GLib.Variant.new('b', window.allows_resize()),
+      canclose: GLib.Variant.new('b', window.can_close()),
+      canmaximize: GLib.Variant.new('b', window.can_maximize()),
+      canminimize: GLib.Variant.new('b', window.can_minimize()),
+      // Mutter returns null for a missing role, and D-Bus has no null, so it goes out as an empty string.
+      role: GLib.Variant.new('s', window.get_role() ?? ''),
+      layer: GLib.Variant.new('u', window.get_layer()),
+      window_type: GLib.Variant.new('u', window.get_window_type()),
+      frame_type: GLib.Variant.new('u', window.get_frame_type()),
+      user_time: GLib.Variant.new('u', window.get_user_time()),
+      stable_sequence: GLib.Variant.new('u', window.get_stable_sequence()),
+    };
   }
 
   Details(winid) {
-    const w = this._get_window_by_wid(winid);
-
-    if (!w) {
-      throw new Error('Not found');
-    }
-
-    const workspaceManager = global.workspace_manager;
-    const currentmonitor = global.display.get_current_monitor();
-    // const monitor = global.display.get_monitor_geometry(currentmonitor);
-
-    const props = {
-      get: ['wm_class', 'wm_class_instance', 'pid', 'id', 'maximized', 'display', 'frame_type', 'window_type', 'layer', 'monitor', 'role', 'title'],
-      can: ['close', 'maximize', 'minimize'],
-      has: ['focus'],
-      custom: new Map([
-        ['moveable', 'allows_move'],
-        ['resizeable', 'allows_resize'],
-        ['area', 'get_work_area_current_monitor'],
-        ['area_all', 'get_work_area_all_monitors'],
-        ['canclose', 'can_close'],
-        ['canmaximize', 'can_maximize'],
-        ['canminimize', 'can_minimize'],
-        ['canshade', 'can_shade'],
-      ]),
-      frame: ['x', 'y', 'width', 'height']
-    };
-
-    const win = {
-      in_current_workspace: w.meta_window.located_on_workspace?.(workspaceManager.get_active_workspace?.()),
-      area_cust: w.meta_window.get_work_area_for_monitor?.(currentmonitor)
-    };
-
-    props.get.forEach(name => win[name] = w.meta_window[`get_${name}`]?.());
-    props.can.forEach(name => win[`can${name}`] = w.meta_window[`can_${name}`]?.());
-    props.has.forEach(name => win[name] = w.meta_window[`has_${name}`]?.());
-    props.custom.forEach((fname, name) => { win[name] = w.meta_window[fname]?.() });
-    let frame = w.meta_window.get_frame_rect();
-    props.frame.forEach(name => win[name] = frame[name]);
-
-    return JSON.stringify(win);
+    return this._windowInfo(this._findWindow(winid));
   }
 
   List() {
-    const win = global.get_window_actors();
-    const workspaceManager = global.workspace_manager;
-
-    const props = {
-      get: ['wm_class', 'wm_class_instance', 'title', 'pid', 'id', 'user_time', 'stable_sequence', 'workspace', 'frame_type', 'window_type', 'width', 'height', 'x', 'y'],
-      has: ['focus'],
-      // custom: new Map([])
-    };
-
-    const winJsonArr = win.map(w => {
-      const win = {
-        in_current_workspace: w.meta_window.located_on_workspace?.(workspaceManager.get_active_workspace?.())
-      };
-      props.get.forEach(name => win[name] = w.meta_window[`get_${name}`]?.());
-      props.has.forEach(name => win[name] = w.meta_window[`has_${name}`]?.());
-      // props.custom.forEach((fname, name) => { win[name] = w.meta_window[fname]?.() });
-      return win;
-    });
-
-    return JSON.stringify(winJsonArr);
+    return global.get_window_actors().map(actor => this._windowInfo(actor.meta_window));
   }
 
-  GetFrameBounds(winid) {
-    let w = this._get_window_by_wid(winid);
-    if (w) {
-      const result = {
-        frame_bounds: w.meta_window.get_frame_bounds(),
-      }
-      return JSON.stringify(result);
-    } else {
-      throw new Error('Not found');
-    }
+  ListWorkspaces() {
+    return Array.from({length: global.workspace_manager.get_n_workspaces()}, (_, index) => ({
+      index: GLib.Variant.new('u', index),
+      name: GLib.Variant.new('s', Meta.prefs_get_workspace_name(index)),
+    }));
+  }
+
+  GetBufferRect(winid) {
+    return this._rectInfo(this._findWindow(winid).get_buffer_rect());
   }
 
   GetFrameRect(winid) {
-    let w = this._get_window_by_wid(winid);
-    if (w) {
-      let frame = w.meta_window.get_frame_rect()
-      const result = {
-        "x": frame.x,
-        "y": frame.y,
-        "width": frame.width,
-        "height": frame.height
-      }
-      return JSON.stringify(result);
-    } else {
-      throw new Error('Not found');
-    }
+    return this._rectInfo(this._findWindow(winid).get_frame_rect());
   }
 
   GetTitle(winid) {
-    let w = this._get_window_by_wid(winid);
-    if (w) {
-      return w.meta_window.get_title();
-    } else {
-      throw new Error('Not found');
-    }
+    return this._findWindow(winid).get_title();
   }
 
   MoveToWorkspace(winid, workspaceNum) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.change_workspace_by_index(workspaceNum, false);
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).change_workspace_by_index(workspaceNum, false);
+  }
+
+  Stick(winid) {
+    this._findWindow(winid).stick();
+  }
+
+  Unstick(winid) {
+    this._findWindow(winid).unstick();
   }
 
   MoveResize(winid, x, y, width, height) {
-    let win = this._get_window_by_wid(winid);
-
-    if (win) {
-      if (win.meta_window.maximized_horizontally || win.meta_window.maximized_vertically) {
-        win.meta_window.unmaximize(3);
-      }
-
-      win.meta_window.move_resize_frame(1, x, y, width, height);
-    } else {
-      throw new Error('Not found');
-    }
+    const window = this._findWindow(winid);
+    this._unmaximize(window);
+    window.move_resize_frame(true, x, y, width, height);
   }
 
   Resize(winid, width, height) {
-    let win = this._get_window_by_wid(winid);
-    if (win) {
-      if (win.meta_window.maximized_horizontally || win.meta_window.maximized_vertically) {
-        win.meta_window.unmaximize(3);
-      }
-      win.meta_window.move_resize_frame(1, win.get_x(), win.get_y(), width, height);
-    } else {
-      throw new Error('Not found');
-    }
+    const window = this._findWindow(winid);
+    this._unmaximize(window);
+    const frame = window.get_frame_rect();
+    window.move_resize_frame(true, frame.x, frame.y, width, height);
   }
 
   Move(winid, x, y) {
-    let win = this._get_window_by_wid(winid);
-    if (win) {
-      if (win.meta_window.maximized_horizontally || win.meta_window.maximized_vertically) {
-        win.meta_window.unmaximize(3);
-      }
-      win.meta_window.move_frame(1, x, y);
-    } else {
-      throw new Error('Not found');
-    }
+    const window = this._findWindow(winid);
+    this._unmaximize(window);
+    window.move_frame(true, x, y);
   }
 
   Maximize(winid) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.maximize(3);
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).maximize(Meta.MaximizeFlags.BOTH);
   }
 
   Minimize(winid) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.minimize();
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).minimize();
   }
 
   Unmaximize(winid) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.unmaximize(3);
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).unmaximize(Meta.MaximizeFlags.BOTH);
   }
 
   Unminimize(winid) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.unminimize();
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).unminimize();
   }
 
   Activate(winid) {
-    const win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      const workspace = win.get_workspace();
-      if (workspace) {
-        workspace.activate_with_focus(win, 0);
-      } else {
-        win.activate(0);
-      }
+    const window = this._findWindow(winid);
+    const workspace = window.get_workspace();
+    if (workspace) {
+      workspace.activate_with_focus(window, 0);
     } else {
-      throw new Error('Not found');
+      window.activate(0);
     }
   }
 
   Close(winid) {
-    let win = this._get_window_by_wid(winid).meta_window;
-    if (win) {
-      win.kill();
-      // win.delete(Math.floor(Date.now() / 1000));
-    } else {
-      throw new Error('Not found');
-    }
+    this._findWindow(winid).kill();
   }
 
   ShowOSD(text, icon, duration_ms) {
