@@ -94,6 +94,20 @@ gwctl listworkspaces
 gwctl stick WINDOW_ID
 gwctl unstick WINDOW_ID
 
+# Switch to workspace 1
+gwctl activateworkspace 1
+
+# Keep a window above all others, and let others cover it again
+gwctl makeabove WINDOW_ID
+gwctl unmakeabove WINDOW_ID
+
+# Show a window fullscreen, and end fullscreen again
+gwctl makefullscreen WINDOW_ID
+gwctl unmakefullscreen WINDOW_ID
+
+# Move a window to the second monitor
+gwctl movetomonitor WINDOW_ID 1
+
 # Check D-Bus connection status
 gwctl setup check-connection
 ```

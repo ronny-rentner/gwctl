@@ -1,5 +1,4 @@
 UUID = gwctl-wayland-api@kamuko.de
-NAME = gwctl API
 ZIP = $(UUID).zip
 
 SCALE ?= 1
