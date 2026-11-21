@@ -163,4 +163,9 @@ export async function run() {
     await waitFor(() => list('ListWorkspaces')[0].name === 'Mail', 'ListWorkspaces reports the name of workspace 0');
     equal(list('ListWorkspaces')[1].index, 1, 'ListWorkspaces index of the second workspace');
     print('PASS ListWorkspaces');
+
+    extension.ActivateWorkspace(1);
+    await waitFor(() => list('ListWorkspaces')[1].active, 'ListWorkspaces reports workspace 1 as active');
+    equal(list('ListWorkspaces')[0].active, false, 'ListWorkspaces active of an inactive workspace');
+    print('PASS ActivateWorkspace');
 }

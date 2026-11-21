@@ -34,3 +34,5 @@ jobs:
       run: python -m pip install dist/*.whl
     - name: Verify import
       run: python -c "import gwctl"
+    - name: Test
+      run: python -m unittest

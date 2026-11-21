@@ -95,6 +95,45 @@ const DBUS_INTERFACE = `
          </arg>
          <annotation name="Description" value="Shows the specified window on the active workspace only." />
       </method>
+      <method name="ActivateWorkspace">
+         <arg type="u" direction="in" name="workspaceNum">
+            <annotation name="Description" value="The number of the workspace to switch to." />
+         </arg>
+         <annotation name="Description" value="Switches to the given workspace." />
+      </method>
+      <method name="MoveToMonitor">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to be moved." />
+         </arg>
+         <arg type="u" direction="in" name="monitor">
+            <annotation name="Description" value="The number of the monitor to move the window to." />
+         </arg>
+         <annotation name="Description" value="Moves the specified window to the given monitor." />
+      </method>
+      <method name="MakeAbove">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to keep above other windows." />
+         </arg>
+         <annotation name="Description" value="Keeps the specified window above other windows." />
+      </method>
+      <method name="UnmakeAbove">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window that other windows may cover again." />
+         </arg>
+         <annotation name="Description" value="Lets other windows cover the specified window again." />
+      </method>
+      <method name="MakeFullscreen">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to show fullscreen." />
+         </arg>
+         <annotation name="Description" value="Shows the specified window fullscreen." />
+      </method>
+      <method name="UnmakeFullscreen">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window to end fullscreen for." />
+         </arg>
+         <annotation name="Description" value="Ends fullscreen for the specified window." />
+      </method>
       <method name="MoveResize">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to be moved and resized." />
@@ -279,6 +318,8 @@ export default class Extension {
       monitor: GLib.Variant.new('i', window.get_monitor()),
       in_current_workspace: GLib.Variant.new('b', window.located_on_workspace(global.workspace_manager.get_active_workspace())),
       on_all_workspaces: GLib.Variant.new('b', window.is_on_all_workspaces()),
+      above: GLib.Variant.new('b', window.is_above()),
+      fullscreen: GLib.Variant.new('b', window.is_fullscreen()),
       pid: GLib.Variant.new('i', window.get_pid()),
       wm_class_instance: GLib.Variant.new('s', window.get_wm_class_instance() ?? ''),
       ...this._rectInfo(window.get_frame_rect()),
@@ -306,9 +347,11 @@ export default class Extension {
   }
 
   ListWorkspaces() {
+    const activeIndex = global.workspace_manager.get_active_workspace_index();
     return Array.from({length: global.workspace_manager.get_n_workspaces()}, (_, index) => ({
       index: GLib.Variant.new('u', index),
       name: GLib.Variant.new('s', Meta.prefs_get_workspace_name(index)),
+      active: GLib.Variant.new('b', index === activeIndex),
     }));
   }
 
@@ -334,6 +377,34 @@ export default class Extension {
 
   Unstick(winid) {
     this._findWindow(winid).unstick();
+  }
+
+  ActivateWorkspace(workspaceNum) {
+    const workspace = global.workspace_manager.get_workspace_by_index(workspaceNum);
+    if (!workspace) {
+      throw new Error('Not found');
+    }
+    workspace.activate(global.get_current_time());
+  }
+
+  MoveToMonitor(winid, monitor) {
+    this._findWindow(winid).move_to_monitor(monitor);
+  }
+
+  MakeAbove(winid) {
+    this._findWindow(winid).make_above();
+  }
+
+  UnmakeAbove(winid) {
+    this._findWindow(winid).unmake_above();
+  }
+
+  MakeFullscreen(winid) {
+    this._findWindow(winid).make_fullscreen();
+  }
+
+  UnmakeFullscreen(winid) {
+    this._findWindow(winid).unmake_fullscreen();
   }
 
   MoveResize(winid, x, y, width, height) {
