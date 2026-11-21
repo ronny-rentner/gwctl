@@ -56,6 +56,9 @@ eval "$(_GWCTL_COMPLETE=zsh_source gwctl)"
 
 ## Usage
 
+In a terminal, gwctl shows results as tables. In a pipe or a file, it prints JSON, so `jq` and scripts can read it.
+`--json` and `--no-json` choose explicitly, and `--max-columns` limits how many columns a table shows (default 8).
+
 ```bash
 # Show version information
 gwctl version
@@ -72,6 +75,9 @@ gwctl --filter wm_class firefox --filter focus true list
 # Extract specific field from results
 gwctl --field id list
 
+# Extract several fields: one line per window, the values separated by tabs
+gwctl --field id --field title list
+
 # Combine filter and field extraction
 gwctl --filter wm_class firefox --field id list
 
@@ -81,11 +87,15 @@ gwctl details WINDOW_ID
 # Move a window
 gwctl move WINDOW_ID X Y
 
+# List workspaces with their names
+gwctl listworkspaces
+
+# Show a window on all workspaces, and again only on the active one
+gwctl stick WINDOW_ID
+gwctl unstick WINDOW_ID
+
 # Check D-Bus connection status
 gwctl setup check-connection
-
-# Get instructions for installing the required extension
-gwctl setup install-extension
 ```
 
 ## Python Usage
@@ -127,14 +137,14 @@ gwctl list | jq '.[] | select(.title | ascii_downcase | contains("firefox"))'
 # Get just the window IDs and titles
 gwctl list | jq '.[] | {id: .id, title: .title}'
 
-# Find windows in a specific workspace
+# Find the windows of workspace 1; add "or .on_all_workspaces" for those shown on every workspace
 gwctl list | jq '.[] | select(.workspace == 1)'
 
 # Find a window by title and get its ID (useful for scripting)
 WINDOW_ID=$(gwctl list | jq -r '.[] | select(.title | contains("Terminal")) | .id')
 gwctl move $WINDOW_ID 100 100
 
-# List all windows on the primary monitor
+# List all windows on the first monitor
 gwctl list | jq '.[] | select(.monitor == 0)'
 
 # Format windows list as a simple table with ID and title
@@ -189,5 +199,3 @@ While the preview runs, `gwctl-preview` in the repository root runs gwctl agains
 ## License
 
 GNU General Public License version 3 or later. See [LICENSE.txt](LICENSE.txt).
-
-```

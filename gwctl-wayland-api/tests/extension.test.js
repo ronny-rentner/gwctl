@@ -153,6 +153,7 @@ export async function run() {
     extension.Stick(terminal.get_id());
     const sticky = list('List').find(window => window.id === terminal.get_id());
     equal(sticky.workspace, -1, 'List workspace of a stuck window');
+    equal(sticky.on_all_workspaces, true, 'List on_all_workspaces of a stuck window');
     extension.Unstick(terminal.get_id());
     const unstuck = list('List').find(window => window.id === terminal.get_id());
     equal(unstuck.workspace, 0, 'List workspace of an unstuck window, the active workspace');

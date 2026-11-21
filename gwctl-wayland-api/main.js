@@ -273,11 +273,12 @@ export default class Extension {
       title: GLib.Variant.new('s', window.get_title()),
       // Mutter returns null for a missing WM_CLASS, and D-Bus has no null, so both its parts go out as empty strings.
       wm_class: GLib.Variant.new('s', window.get_wm_class() ?? ''),
+      focus: GLib.Variant.new('b', window.has_focus()),
       // -1 marks a window on all workspaces, as in wmctrl; get_workspace() would report the active workspace for it.
       workspace: GLib.Variant.new('i', window.is_on_all_workspaces() ? -1 : window.get_workspace().index()),
       monitor: GLib.Variant.new('i', window.get_monitor()),
       in_current_workspace: GLib.Variant.new('b', window.located_on_workspace(global.workspace_manager.get_active_workspace())),
-      focus: GLib.Variant.new('b', window.has_focus()),
+      on_all_workspaces: GLib.Variant.new('b', window.is_on_all_workspaces()),
       pid: GLib.Variant.new('i', window.get_pid()),
       wm_class_instance: GLib.Variant.new('s', window.get_wm_class_instance() ?? ''),
       ...this._rectInfo(window.get_frame_rect()),

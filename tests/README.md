@@ -1,14 +1,8 @@
 # Testing
 
-This project is difficult to test in automated environments because it requires:
-- A running GNOME Shell session
-- D-Bus connections to that session
-- The "Windows D-Bus Interface" GNOME Shell extension
+The extension has automated tests: `make test-shell` in `gwctl-wayland-api/` runs them in a headless GNOME Shell.
 
-Therefore, automatic testing is limited to:
-- Linting
-- Package building
-- Import verification
+The `gwctl` command has no automated tests yet. Test it against the preview: run `make preview` in
+`gwctl-wayland-api/`, then `./gwctl-preview` in the repository root.
 
-Manual testing is recommended for functionality verification.
-EOF < /dev/null
+CI checks that the Python package compiles, builds and imports.
