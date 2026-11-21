@@ -154,6 +154,9 @@ class SetupCommand:
                 result = subprocess.run(['gnome-extensions', 'enable', uuid], capture_output=True, text=True)
                 if result.returncode == 0:
                     click.output.success("Extension enabled successfully!")
+                    if is_installed:
+                        # GNOME Shell keeps the extension code it loaded at login, so the new files only take effect then.
+                        click.output.warning("GNOME Shell keeps running the old version until you log out and back in.")
                 else:
                     click.output.warning("Could not enable automatically (Shell restart likely required).")
                     click.output.info("\n[bold]Required next steps:[/bold]")
