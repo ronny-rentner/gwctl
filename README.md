@@ -98,12 +98,15 @@ gwctl unstick WINDOW_ID
 gwctl activateworkspace 1
 
 # Keep a window above all others, and let others cover it again
-gwctl makeabove WINDOW_ID
-gwctl unmakeabove WINDOW_ID
+gwctl keepabove WINDOW_ID
+gwctl unkeepabove WINDOW_ID
 
 # Show a window fullscreen, and end fullscreen again
-gwctl makefullscreen WINDOW_ID
-gwctl unmakefullscreen WINDOW_ID
+gwctl fullscreen WINDOW_ID
+gwctl unfullscreen WINDOW_ID
+
+# Switch a window's fullscreen state to the opposite; stick, keepabove, maximize and minimize work the same
+gwctl toggle fullscreen WINDOW_ID
 
 # Move a window to the second monitor
 gwctl movetomonitor WINDOW_ID 1

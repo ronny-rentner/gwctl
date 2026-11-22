@@ -144,6 +144,14 @@ step('List reports the workspace of moved, stuck and unstuck windows', async () 
     equal(unstuck.workspace, 0, 'List workspace of an unstuck window, the active workspace');
 });
 
+step('Toggle switches keep-above to its opposite, under either name of the pair', async () => {
+    const editorWindow = findWindow(editor);
+    extension.Toggle('keepabove', editorWindow.get_id());
+    equal(list('List').find(window => window.id === editorWindow.get_id()).above, true, 'List above after toggling keepabove');
+    extension.Toggle('unkeepabove', editorWindow.get_id());
+    equal(list('List').find(window => window.id === editorWindow.get_id()).above, false, 'List above after toggling unkeepabove');
+});
+
 step('ListWorkspaces reports the workspace names set in GNOME', async () => {
     new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'}).set_strv('workspace-names', ['Mail']);
     await Scripting.waitLeisure();
@@ -171,8 +179,9 @@ export async function run() {
     (await Scripting._getPerfHelper()).ExitSync();
     // Without this, the Shell tries to stop the helper again at the end and fails.
     await Scripting.disableHelperAutoExit();
-    // A headless Shell has no keyboard, and the key events of Key() only reach applications through one. The device
-    // stays as long as this variable holds it.
+    // Stands in for the keyboard a real desktop has from the start. Without one, applications set up their keyboard
+    // input only when Key() creates its own device, too late for the keys of that first call. The device stays as long
+    // as this variable holds it.
     const keyboard = global.stage.context.get_backend().get_default_seat()
         .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
     // shell-session.sh enables only the extension under test.

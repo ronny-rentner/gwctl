@@ -109,29 +109,38 @@ const DBUS_INTERFACE = `
          </arg>
          <annotation name="Description" value="Moves the specified window to the given monitor." />
       </method>
-      <method name="MakeAbove">
+      <method name="KeepAbove">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to keep above other windows." />
          </arg>
          <annotation name="Description" value="Keeps the specified window above other windows." />
       </method>
-      <method name="UnmakeAbove">
+      <method name="UnkeepAbove">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window that other windows may cover again." />
          </arg>
          <annotation name="Description" value="Lets other windows cover the specified window again." />
       </method>
-      <method name="MakeFullscreen">
+      <method name="Fullscreen">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to show fullscreen." />
          </arg>
          <annotation name="Description" value="Shows the specified window fullscreen." />
       </method>
-      <method name="UnmakeFullscreen">
+      <method name="Unfullscreen">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to end fullscreen for." />
          </arg>
          <annotation name="Description" value="Ends fullscreen for the specified window." />
+      </method>
+      <method name="Toggle">
+         <arg type="s" direction="in" name="command">
+            <annotation name="Description" value="Either command of the pair whose state to switch: stick, keepabove, fullscreen, maximize or minimize, or the same with un in front." />
+         </arg>
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window." />
+         </arg>
+         <annotation name="Description" value="Switches a state of the specified window to its opposite." />
       </method>
       <method name="MoveResize">
          <arg type="u" direction="in" name="winid">
@@ -266,6 +275,16 @@ const MODIFIERS = {
   esc: Clutter.KEY_Escape,
 };
 
+// The commands Toggle switches, each with the List field that tells whether its state is on, the method that runs it
+// and the method that undoes it.
+const TOGGLES = {
+  stick: ['on_all_workspaces', 'Stick', 'Unstick'],
+  keepabove: ['above', 'KeepAbove', 'UnkeepAbove'],
+  fullscreen: ['fullscreen', 'Fullscreen', 'Unfullscreen'],
+  maximize: ['maximized', 'Maximize', 'Unmaximize'],
+  minimize: ['minimized', 'Minimize', 'Unminimize'],
+};
+
 export default class Extension {
   enable() {
     // Keep D-Bus export setup with the implementation so the entry shim stays trivial.
@@ -299,7 +318,7 @@ export default class Extension {
 
   _unmaximize(window) {
     if (window.maximized_horizontally || window.maximized_vertically) {
-      window.unmaximize(Meta.MaximizeFlags.BOTH);
+      window.unmaximize();
     }
   }
 
@@ -326,6 +345,8 @@ export default class Extension {
       on_all_workspaces: GLib.Variant.new('b', window.is_on_all_workspaces()),
       above: GLib.Variant.new('b', window.is_above()),
       fullscreen: GLib.Variant.new('b', window.is_fullscreen()),
+      maximized: GLib.Variant.new('b', window.is_maximized()),
+      minimized: GLib.Variant.new('b', window.minimized),
       pid: GLib.Variant.new('i', window.get_pid()),
       wm_class_instance: GLib.Variant.new('s', window.get_wm_class_instance() ?? ''),
       ...this._rectInfo(window.get_frame_rect()),
@@ -397,20 +418,34 @@ export default class Extension {
     this._findWindow(winid).move_to_monitor(monitor);
   }
 
-  MakeAbove(winid) {
+  KeepAbove(winid) {
     this._findWindow(winid).make_above();
   }
 
-  UnmakeAbove(winid) {
+  UnkeepAbove(winid) {
     this._findWindow(winid).unmake_above();
   }
 
-  MakeFullscreen(winid) {
+  Fullscreen(winid) {
     this._findWindow(winid).make_fullscreen();
   }
 
-  UnmakeFullscreen(winid) {
+  Unfullscreen(winid) {
     this._findWindow(winid).unmake_fullscreen();
+  }
+
+  Toggle(command, winid) {
+    // Both commands of a pair switch the same state, so e.g. unstick works like stick.
+    const toggle = TOGGLES[command.replace(/^un/, '')];
+    if (!toggle) {
+      throw new Error(`Cannot toggle: ${command}`);
+    }
+    const [field, run, undo] = toggle;
+    if (this._windowInfo(this._findWindow(winid))[field].unpack()) {
+      this[undo](winid);
+    } else {
+      this[run](winid);
+    }
   }
 
   MoveResize(winid, x, y, width, height) {
@@ -433,7 +468,7 @@ export default class Extension {
   }
 
   Maximize(winid) {
-    this._findWindow(winid).maximize(Meta.MaximizeFlags.BOTH);
+    this._findWindow(winid).maximize();
   }
 
   Minimize(winid) {
@@ -441,7 +476,7 @@ export default class Extension {
   }
 
   Unmaximize(winid) {
-    this._findWindow(winid).unmaximize(Meta.MaximizeFlags.BOTH);
+    this._findWindow(winid).unmaximize();
   }
 
   Unminimize(winid) {
