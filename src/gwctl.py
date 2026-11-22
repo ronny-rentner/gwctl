@@ -430,6 +430,12 @@ class GnomeWindowControl:
 
         # Extract specific fields if requested
         fields = self.meta.get('field')
+        # A single dictionary, such as the one details returns, counts as one entry.
+        if fields and isinstance(result, dict):
+            check_fields([result], fields)
+            if self.meta.get('json'):
+                return {name: result[name] for name in fields}
+            return "\t".join(str(result[name]) for name in fields)
         if fields and isinstance(result, list):
             check_fields(result, fields)
             # Only an explicit --json gives the fields as JSON; by default they stay lines that tools like xargs read.

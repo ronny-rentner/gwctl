@@ -14,6 +14,10 @@ INTERFACE_XML = """
       <method name="List">
          <arg type="aa{sv}" direction="out" name="windows"/>
       </method>
+      <method name="Details">
+         <arg type="u" direction="in" name="winid"/>
+         <arg type="a{sv}" direction="out" name="details"/>
+      </method>
       <method name="GetTitle">
          <arg type="u" direction="in" name="winid"/>
          <arg type="s" direction="out" name="title"/>
@@ -49,6 +53,7 @@ class FakeProxy:
         self.calls = []
         self.results = {
             'List': dbus.Array([window(1, 'Editor', True), window(2, 'Terminal', False)], signature='a{sv}'),
+            'Details': window(1, 'Editor', True),
             'GetTitle': dbus.String('Editor'),
         }
 
@@ -115,6 +120,18 @@ class TestGwctl(unittest.TestCase):
                 result = self.run_cli(*args, 'list')
                 self.assertEqual(result.exit_code, 1)
                 self.assertIn('Unknown field: a', result.output)
+
+    def test_fields_of_a_single_result_print_as_one_line(self):
+        self.assertEqual(self.run_cli('--field', 'id', '--field', 'title', 'details', '1').output, '1\tEditor\n')
+
+    def test_explicit_json_reduces_a_single_result_to_fields(self):
+        result = self.run_cli('--json', '--field', 'id', '--field', 'title', 'details', '1')
+        self.assertEqual(json.loads(result.output), {'id': 1, 'title': 'Editor'})
+
+    def test_unknown_field_of_a_single_result_fails(self):
+        result = self.run_cli('--field', 'a', 'details', '1')
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('Unknown field: a', result.output)
 
     def test_text_result_prints_as_is(self):
         self.assertEqual(self.run_cli('gettitle', '1').output, 'Editor\n')

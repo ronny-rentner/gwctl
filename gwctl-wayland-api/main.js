@@ -33,45 +33,36 @@ const DBUS_INTERFACE = `
       </method>
       <method name="ListWorkspaces">
          <arg type="aa{sv}" direction="out" name="workspaces">
-            <annotation name="Description" value="One dictionary with index and name per workspace." />
+            <annotation name="Description" value="One dictionary of properties per workspace." />
          </arg>
-         <annotation name="Description" value="Lists all workspaces with their index and name." />
+         <annotation name="Description" value="Lists all workspaces and returns their properties." />
       </method>
       <method name="Details">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to get details for." />
          </arg>
          <arg type="a{sv}" direction="out" name="details">
-            <annotation name="Description" value="A dictionary with detailed information about the specified window." />
+            <annotation name="Description" value="A dictionary of the specified window's properties." />
          </arg>
-         <annotation name="Description" value="Returns detailed information about a specific window (by winid)." />
+         <annotation name="Description" value="Returns the properties of the specified window." />
       </method>
       <method name="GetTitle">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to fetch the title from." />
          </arg>
-         <arg type="s" direction="out" name="win">
-            <annotation name="Description" value="Returns the title of the specified window." />
+         <arg type="s" direction="out" name="title">
+            <annotation name="Description" value="The title of the specified window." />
          </arg>
          <annotation name="Description" value="Returns the title of the specified window." />
       </method>
-      <method name="GetFrameRect">
+      <method name="GetGeometry">
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window." />
          </arg>
-         <arg type="a{sv}" direction="out" name="frameRect">
-            <annotation name="Description" value="x, y, width and height of the window's visible edges." />
+         <arg type="a{sv}" direction="out" name="geometry">
+            <annotation name="Description" value="x, y, width and height of the window's visible edges, and buffer_x, buffer_y, buffer_width and buffer_height of the area its pixels cover." />
          </arg>
-         <annotation name="Description" value="Returns the position and size of the window's visible edges. A shadow the application draws around the window is not included." />
-      </method>
-      <method name="GetBufferRect">
-         <arg type="u" direction="in" name="winid">
-            <annotation name="Description" value="The ID of the window." />
-         </arg>
-         <arg type="a{sv}" direction="out" name="bufferRect">
-            <annotation name="Description" value="x, y, width and height of the area the window's pixels cover." />
-         </arg>
-         <annotation name="Description" value="Returns the position and size of the area the window's pixels cover. This includes a shadow the application draws around the window, so it can be larger than the frame rectangle." />
+         <annotation name="Description" value="Returns the position and size of the window's visible edges and of the area its pixels cover." />
       </method>
       <method name="MoveToWorkspace">
          <arg type="u" direction="in" name="winid">
@@ -218,7 +209,13 @@ const DBUS_INTERFACE = `
          <arg type="u" direction="in" name="winid">
             <annotation name="Description" value="The ID of the window to close." />
          </arg>
-         <annotation name="Description" value="Closes the specified window." />
+         <annotation name="Description" value="Asks the specified window to close, like its close button." />
+      </method>
+      <method name="Kill">
+         <arg type="u" direction="in" name="winid">
+            <annotation name="Description" value="The ID of the window whose application to kill." />
+         </arg>
+         <annotation name="Description" value="Kills the application of the specified window." />
       </method>
       <method name="ShowOSD">
          <arg type="s" direction="in" name="text">
@@ -232,7 +229,7 @@ const DBUS_INTERFACE = `
             <annotation name="Description" value="Display duration in milliseconds." />
             <annotation name="Default" value="5000" />
          </arg>
-         <annotation name="Description" value="Show a temporary GNOME on-screen display without taking focus." />
+         <annotation name="Description" value="Shows the GNOME on-screen display." />
       </method>
       <method name="Type">
          <arg type="s" direction="in" name="text">
@@ -244,13 +241,13 @@ const DBUS_INTERFACE = `
          <arg type="b" direction="in" name="clear">
             <annotation name="Description" value="Clear preedit text on input reset." />
          </arg>
-         <annotation name="Description" value="Insert text into the focussed application." />
+         <annotation name="Description" value="Inserts text into the focussed application." />
       </method>
       <method name="Key">
          <arg type="as" direction="in" name="keys">
             <annotation name="Description" value="Keys in the order to send, in GNOME accelerator format: a key symbol name with modifiers or other keys to hold in front, or modifiers alone, e.g. Return, &lt;Control&gt;a, &lt;Control_R&gt;a or &lt;Super&gt;." />
          </arg>
-         <annotation name="Description" value="Press and release keys one after another in the focussed application." />
+         <annotation name="Description" value="Presses and releases keys one after another (e.g. &lt;Control&gt;s)." />
       </method>
    </interface>
 </node>
@@ -322,12 +319,12 @@ export default class Extension {
     }
   }
 
-  _rectInfo(rect) {
+  _rectInfo(rect, prefix = '') {
     return {
-      x: GLib.Variant.new('i', rect.x),
-      y: GLib.Variant.new('i', rect.y),
-      width: GLib.Variant.new('i', rect.width),
-      height: GLib.Variant.new('i', rect.height),
+      [`${prefix}x`]: GLib.Variant.new('i', rect.x),
+      [`${prefix}y`]: GLib.Variant.new('i', rect.y),
+      [`${prefix}width`]: GLib.Variant.new('i', rect.width),
+      [`${prefix}height`]: GLib.Variant.new('i', rect.height),
     };
   }
 
@@ -382,12 +379,9 @@ export default class Extension {
     }));
   }
 
-  GetBufferRect(winid) {
-    return this._rectInfo(this._findWindow(winid).get_buffer_rect());
-  }
-
-  GetFrameRect(winid) {
-    return this._rectInfo(this._findWindow(winid).get_frame_rect());
+  GetGeometry(winid) {
+    const window = this._findWindow(winid);
+    return {...this._rectInfo(window.get_frame_rect()), ...this._rectInfo(window.get_buffer_rect(), 'buffer_')};
   }
 
   GetTitle(winid) {
@@ -494,6 +488,10 @@ export default class Extension {
   }
 
   Close(winid) {
+    this._findWindow(winid).delete(global.get_current_time());
+  }
+
+  Kill(winid) {
     this._findWindow(winid).kill();
   }
 
