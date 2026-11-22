@@ -1,13 +1,24 @@
 # Runs a GNOME Shell with the extension package given as the first argument, isolated in its own XDG directories and
 # session bus, so it cannot touch the desktop's files or settings. They live in the directory given as the second
-# argument, by default build/preview in the current directory. Further arguments go to gnome-shell, by default
-# --wayland --devkit; a leading --reset-settings first resets the sandbox's settings to their defaults.
+# argument, a path inside the build directory next to this script, by default preview. Further arguments go to
+# gnome-shell, by default --wayland --devkit; a leading --reset first empties that directory, a leading --reset-settings
+# first resets the sandbox's settings to their defaults.
 set -e
 
-zip=$(realpath "${1:?Usage: shell-session.sh ZIP [DIR [--reset-settings] [gnome-shell options]]}")
-dir=$(realpath -m "${2:-build/preview}")
+zip=$(realpath "${1:?Usage: shell-session.sh ZIP [DIR [--reset | --reset-settings] [gnome-shell options]]}")
+build=$(realpath -m -- "${BASH_SOURCE[0]}/../build")
+dir=$(realpath -m "$build/${2:-preview}")
+# --reset deletes DIR, so it must lie strictly inside build, neither leading out through .. nor through a symbolic link.
+case $dir in
+	"$build"/?*) ;;
+	*) echo "DIR must lie inside build: $dir" >&2; exit 1 ;;
+esac
 shift
 [ $# -eq 0 ] || shift
+if [ "$1" = --reset ]; then
+	rm -rf "$dir"
+	shift
+fi
 echo "Running in persistent home: $dir"
 
 # UI scale (a whole number) and text scale of the Shell; the environment can override these defaults. run_session

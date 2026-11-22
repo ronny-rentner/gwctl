@@ -1,46 +1,47 @@
-UUID = gwctl-wayland-api@kamuko.de
-ZIP = $(UUID).zip
+UUID := gwctl-wayland-api@kamuko.de
+EXTENSION_FILES := extension.js main.js metadata.json
+ZIP := $(UUID).zip
 
-SCALE ?= 1
+# UI scale (a whole number) and text scale, independent of the display resolution.
+SCALE ?= 2
 TEXT_SCALE ?= 1.25
-
-EXTENSION_FILES = extension.js main.js metadata.json export-keymap.js
+# Headless display size in pixels; the interactive preview follows its devkit window size.
+RESOLUTION ?= 3840x2160
 
 # What shell-session.sh needs from here.
 export SCALE TEXT_SCALE
 
-.PHONY: all compile zip install preview test-shell clean clean-env
+.ONESHELL:
+.SHELLFLAGS := -ec
 
-all: compile zip
+.PHONY: preview test-shell compile zip install clean clean-env
+.DEFAULT_GOAL := preview
 
 compile:
-	@#echo ":: No compilation needed for this extension."
+	@#echo ":: No compilation needed for this extension"
+
+# Settings are under build/preview and are kept between runs.
+preview: zip
+	@bash shell-session.sh "$(ZIP)" "$@"
+
+test-shell: zip
+	@echo ":: Running tests/extension.test.js"
+	bash shell-session.sh "$(ZIP)" "$@" --reset \
+		--wayland --headless --virtual-monitor $(RESOLUTION) \
+			--automation-script tests/extension.test.js
 
 zip: compile
-	@echo ":: Creating extension bundle..."
-	@# Package every runtime module so the installed extension can resolve the entry shim import.
-	@zip -qr $(ZIP) $(EXTENSION_FILES)
+	@echo ":: Creating extension bundle"
+	zip -qr -FS $(ZIP) $(EXTENSION_FILES)
+	echo ":: Extension bundle ready: $(abspath $(ZIP))"
 
 install: zip
-	@echo ":: Installing extension..."
-	@gnome-extensions install --force "$(ZIP)"
-	@echo ":: Installed $(UUID). Log out and back in to load it."
-
-# A Shell in a window, with the extension. Its settings are under build/preview and are kept between runs.
-preview: zip
-	@bash shell-session.sh "$(ZIP)"
-
-# Run automated tests in headless shell
-test-shell: zip
-	@mkdir -p "$(CURDIR)/build/$@"
-	@bash shell-session.sh "$(ZIP)" "$(CURDIR)/build/$@" --reset-settings \
-		--wayland --headless --virtual-monitor 1920x1080 --automation-script tests/extension.test.js \
-		2> "$(CURDIR)/build/$@/session.log" \
-		|| { grep 'Script failed' "$(CURDIR)/build/$@/session.log"; echo "Log: build/$@/session.log"; exit 1; }
-
-# What the preview Shell keeps: its settings and its copy of the extension.
-clean-env:
-	rm -rf build/preview
+	@echo ":: Installing extension"
+	gnome-extensions install --force "$(ZIP)"
+	echo ":: Installed $(UUID). Log out and back in to load it."
 
 clean:
 	rm -f $(ZIP)
+
+clean-env:
+	rm -rf build/preview build/test-shell

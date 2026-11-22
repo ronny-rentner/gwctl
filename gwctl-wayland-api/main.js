@@ -21,7 +21,6 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import {getKeyboardManager} from 'resource:///org/gnome/shell/misc/keyboardManager.js';
 
 const DBUS_INTERFACE = `
 <node>
@@ -240,7 +239,7 @@ const DBUS_INTERFACE = `
       </method>
       <method name="Key">
          <arg type="as" direction="in" name="keys">
-            <annotation name="Description" value="Keys in the order to send, in GNOME accelerator format: a key symbol name or a keycode as hex, with modifiers in front, e.g. Return, &lt;Control&gt;a or 0x24." />
+            <annotation name="Description" value="Keys in the order to send, in GNOME accelerator format: a key symbol name with modifiers or other keys to hold in front, or modifiers alone, e.g. Return, &lt;Control&gt;a, &lt;Control_R&gt;a or &lt;Super&gt;." />
          </arg>
          <annotation name="Description" value="Press and release keys one after another in the focussed application." />
       </method>
@@ -248,23 +247,23 @@ const DBUS_INTERFACE = `
 </node>
 `;
 
-// Modifier names of the GNOME accelerator format.
+// Modifier names of the GNOME accelerator format and the key that holds each modifier.
 const MODIFIERS = {
-  primary: Clutter.ModifierType.CONTROL_MASK,
-  control: Clutter.ModifierType.CONTROL_MASK,
-  ctrl: Clutter.ModifierType.CONTROL_MASK,
-  ctl: Clutter.ModifierType.CONTROL_MASK,
-  shift: Clutter.ModifierType.SHIFT_MASK,
-  shft: Clutter.ModifierType.SHIFT_MASK,
-  alt: Clutter.ModifierType.MOD1_MASK,
-  mod1: Clutter.ModifierType.MOD1_MASK,
-  mod2: Clutter.ModifierType.MOD2_MASK,
-  mod3: Clutter.ModifierType.MOD3_MASK,
-  mod4: Clutter.ModifierType.MOD4_MASK,
-  mod5: Clutter.ModifierType.MOD5_MASK,
-  meta: Clutter.ModifierType.META_MASK,
-  hyper: Clutter.ModifierType.HYPER_MASK,
-  super: Clutter.ModifierType.SUPER_MASK,
+  primary: Clutter.KEY_Control_L,
+  control: Clutter.KEY_Control_L,
+  ctrl: Clutter.KEY_Control_L,
+  ctl: Clutter.KEY_Control_L,
+  shift: Clutter.KEY_Shift_L,
+  shft: Clutter.KEY_Shift_L,
+  alt: Clutter.KEY_Alt_L,
+  mod1: Clutter.KEY_Alt_L,
+  mod4: Clutter.KEY_Super_L,
+  mod5: Clutter.KEY_ISO_Level3_Shift,
+  meta: Clutter.KEY_Meta_L,
+  hyper: Clutter.KEY_Hyper_L,
+  super: Clutter.KEY_Super_L,
+  // Technically not a modifier but who cares?
+  esc: Clutter.KEY_Escape,
 };
 
 export default class Extension {
@@ -272,15 +271,13 @@ export default class Extension {
     // Keep D-Bus export setup with the implementation so the entry shim stays trivial.
     this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_INTERFACE, this);
     this._dbus.export(Gio.DBus.session, '/org/gnome/Shell/Extensions/gwctlAPI');
-    // The exporter needs Gdk, which must not be loaded into the shell, so it runs as a process of its own.
-    const dir = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
-    Gio.Subprocess.new(['gjs', '-m', GLib.build_filenamev([dir, 'export-keymap.js'])], Gio.SubprocessFlags.NONE);
   }
 
   disable() {
     this._dbus.flush();
     this._dbus.unexport();
     delete this._dbus;
+    delete this._keyboard;
   }
 
   _findWindow(winid) {
@@ -289,6 +286,15 @@ export default class Extension {
       throw new Error('Not found');
     }
     return window;
+  }
+
+  _findKeyval(name) {
+    // Clutter names the XF86 keys without that prefix.
+    const keyval = Clutter[`KEY_${name.replace(/^XF86/, '')}`];
+    if (keyval === undefined) {
+      throw new Error(`Unknown key: ${name}`);
+    }
+    return keyval;
   }
 
   _unmaximize(window) {
@@ -480,35 +486,28 @@ export default class Extension {
   }
 
   Key(keys) {
-    const keymapFile = `${GLib.get_user_cache_dir()}/gwctl-wayland-api-keymap.json`;
-    if (!this._keymap && GLib.file_test(keymapFile, GLib.FileTest.EXISTS)) {
-      this._keymap = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(keymapFile)[1]));
-    }
-    const symbols = this._keymap?.groups[getKeyboardManager().currentLayout.groupIndex] ?? {};
-    // Resolve every key first so an unknown one fails before anything is sent.
-    const combos = keys.map(key => {
-      let state = 0;
+    // The input method's forward_key() cannot carry modifiers to Wayland applications, a virtual keyboard holds them
+    // down as keys like a real one.
+    this._keyboard ??= global.stage.context.get_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    for (const key of keys) {
+      const held = [];
       const name = key.replace(/<(\w+)>/g, (tag, modifier) => {
-        state |= MODIFIERS[modifier.toLowerCase()];
+        // A modifier name stands for the key that holds the modifier, any other name for that key itself.
+        held.push(MODIFIERS[modifier.toLowerCase()] ?? this._findKeyval(modifier));
         return '';
       });
-      if (/^0x[0-9a-f]+$/i.test(name)) {
-        return [0, parseInt(name, 16), state];
+      // Modifiers alone, e.g. <Super>, have no key of their own. The lookup comes before anything is pressed, so an
+      // unknown key cannot leave a modifier held down.
+      const keyval = name === '' ? 0 : this._findKeyval(name);
+      // The virtual keyboard takes the time of the event in microseconds.
+      const time = GLib.get_monotonic_time();
+      held.forEach(heldKeyval => this._keyboard.notify_keyval(time, heldKeyval, Clutter.KeyState.PRESSED));
+      if (keyval) {
+        // notify_keyval() finds the key in the current layout and itself holds Shift or AltGr when the keyval needs them.
+        this._keyboard.notify_keyval(time, keyval, Clutter.KeyState.PRESSED);
+        this._keyboard.notify_keyval(time, keyval, Clutter.KeyState.RELEASED);
       }
-      // GNOME accelerators ignore case and the XF86 prefix; of names differing only by case, the lower-case one wins.
-      const wanted = name.toLowerCase().replace(/^xf86/, '');
-      const symbol = Object.keys(symbols).filter(s => s.toLowerCase() === wanted).sort().at(-1);
-      if (!symbol) {
-        throw new Error(`Unknown key: ${key}`);
-      }
-      const [keyval, keycode, modifiers] = symbols[symbol];
-      return [keyval, keycode, state | modifiers];
-    });
-    const inputMethod = global.stage.context.get_backend().get_input_method();
-    for (const [keyval, keycode, state] of combos) {
-      // forward_key() takes the time of the event in microseconds.
-      inputMethod.forward_key(keyval, keycode, state, GLib.get_monotonic_time(), true);
-      inputMethod.forward_key(keyval, keycode, state, GLib.get_monotonic_time(), false);
+      held.toReversed().forEach(heldKeyval => this._keyboard.notify_keyval(time, heldKeyval, Clutter.KeyState.RELEASED));
     }
   }
 }

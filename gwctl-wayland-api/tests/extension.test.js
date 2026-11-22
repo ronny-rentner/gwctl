@@ -7,18 +7,27 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Scripting from 'resource:///org/gnome/shell/ui/scripting.js';
 
-const UUID = 'gwctl-wayland-api@kamuko.de';
 const out = `${GLib.get_user_state_dir()}/type-test`;
 
-let extension, keyboard;
+let extension;
+const steps = [];
 
-async function waitFor(predicate, message) {
-    const deadline = GLib.get_monotonic_time() + 20000000;
-    while (!await predicate()) {
-        if (GLib.get_monotonic_time() > deadline)
-            throw new Error(`Timed out: ${message}`);
-        await Scripting.sleep(100);
-    }
+function step(name, act) {
+    steps.push([name, act]);
+}
+
+// Resolves once the condition holds, checking it again whenever the object emits one of the signals.
+function waitFor(condition, object, signals) {
+    return new Promise(resolve => {
+        const handlers = signals.map(signal => object.connect(signal, check));
+        function check() {
+            if (condition()) {
+                handlers.forEach(handler => object.disconnect(handler));
+                resolve();
+            }
+        }
+        check();
+    });
 }
 
 function equal(actual, expected, message) {
@@ -40,20 +49,12 @@ async function shot(name) {
     stream.close(null);
 }
 
-async function pressKeys(...keyvals) {
-    for (const keyval of keyvals)
-        keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
-    for (const keyval of keyvals.reverse())
-        keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
-    await Scripting.sleep(100);
-}
-
 function readFile(path) {
     return new TextDecoder().decode(GLib.file_get_contents(path)[1]);
 }
 
-// Each application writes the committed text into its file; text() returns it without line breaks.
-const apps = [{
+// Text Editor writes its document into its file when it saves.
+const editor = {
     name: 'Text Editor',
     wmClass: 'org.gnome.TextEditor',
     file: `${out}/editor.txt`,
@@ -61,12 +62,10 @@ const apps = [{
         GioUnix.DesktopAppInfo.new('org.gnome.TextEditor.desktop')
             .launch_uris([Gio.File.new_for_path(this.file).get_uri()], global.create_app_launch_context(0, -1));
     },
-    async text() {
-        await pressKeys(Clutter.KEY_Control_L, Clutter.KEY_s);
-        await Scripting.sleep(1000);
-        return readFile(this.file).replaceAll('\n', '');
-    },
-}, {
+};
+
+// Terminal runs cat, which writes each line once Return ends it.
+const terminal = {
     name: 'Terminal',
     wmClass: 'org.gnome.Terminal',
     file: `${out}/terminal.txt`,
@@ -74,21 +73,7 @@ const apps = [{
         Gio.AppInfo.create_from_commandline(`gnome-terminal -- sh -c 'cat > "${this.file}"'`, null,
             Gio.AppInfoCreateFlags.NONE).launch([], global.create_app_launch_context(0, -1));
     },
-    // cat receives the line once Return ends it.
-    async text() {
-        await pressKeys(Clutter.KEY_Return);
-        await Scripting.sleep(500);
-        return readFile(this.file).replaceAll('\n', '');
-    },
-}];
-
-const cases = [
-    ['1 preview then commit', {preview: 'one', commit: 'one', expected: 'one'}],
-    ['2 second preview then commit', {preview: 'two', commit: 'two', expected: 'onetwo'}],
-    ['3a reset mode COMMIT', {preview: 'three', commit: 'three', expected: 'onetwothree'}],
-    ['3b reset mode CLEAR', {preview: 'four', clear: true, commit: 'four', expected: 'onetwothreefour'}],
-    ['4 empty commit', {preview: 'five', commit: '', expected: 'onetwothreefour'}],
-];
+};
 
 // Returns what a list method of the extension sends over D-Bus, unpacked as a D-Bus caller receives it.
 function list(method) {
@@ -96,76 +81,110 @@ function list(method) {
 }
 
 function findWindow(app) {
-    return global.get_window_actors().map(actor => actor.meta_window)
-        .find(window => window.get_wm_class() === app.wmClass);
+    return global.display.list_all_windows().find(window => window.get_wm_class() === app.wmClass);
 }
 
 async function focus(app) {
     findWindow(app).activate(global.display.get_current_time_roundtrip());
-    await waitFor(() => findWindow(app).has_focus(), `the ${app.name} window has focus`);
-    await Scripting.sleep(1000);
+    await waitFor(() => findWindow(app).has_focus(), global.display, ['notify::focus-window']);
+    await Scripting.sleep(100);
 }
 
-// The overview takes the keyboard focus from the window, so the application's text input is reset and enabled again.
-async function moveFocusAwayAndBack() {
-    Main.overview.show();
-    await waitFor(() => Main.overview.visible && !Main.overview.animationInProgress, 'the overview is shown');
-    Main.overview.hide();
-    await waitFor(() => !Main.overview.visible, 'the overview is hidden');
-    await Scripting.sleep(500);
+step('Opening Text Editor', async () => {
+    GLib.unlink(editor.file);
+    editor.launch();
+    await waitFor(() => findWindow(editor), global.window_manager, ['map']);
+});
+
+step('Opening Terminal', async () => {
+    GLib.unlink(terminal.file);
+    terminal.launch();
+    await waitFor(() => findWindow(terminal), global.window_manager, ['map']);
+});
+
+// Each case types one line, which the last steps check in the files.
+const cases = [
+    ['Preview then commit', {preview: 'one', commit: 'one'}],
+    ['A second preview then commit', {preview: 'two', commit: 'two'}],
+    ['A preview in reset mode COMMIT then commit', {preview: 'three', commit: 'three'}],
+    ['A preview in reset mode CLEAR then commit', {preview: 'four', clear: true, commit: 'four'}],
+    ['An empty commit', {preview: 'five', commit: ''}],
+];
+
+for (const [name, {preview, clear = false, commit}] of cases) {
+    step(`${name} in Text Editor`, async () => {
+        await focus(editor);
+        extension.Type(preview, true, clear);
+        extension.Type(commit, false, false);
+        extension.Key(['Return', '<Control>s']);
+        await shot(`Text Editor ${name}`.replace(/\W+/g, '-'));
+    });
+    step(`${name} in Terminal`, async () => {
+        await focus(terminal);
+        extension.Type(preview, true, clear);
+        extension.Type(commit, false, false);
+        extension.Key(['Return']);
+        await shot(`Terminal ${name}`.replace(/\W+/g, '-'));
+    });
 }
 
-export async function run() {
-    // The Shell's helper process for automation scripts leaves by itself after half a minute, which can be before
-    // this test is done. Without this, the Shell tries to stop it at the end and ends with a failure.
-    await Scripting.disableHelperAutoExit();
-    await waitFor(() => Main.extensionManager.lookup(UUID)?.stateObj, 'the extension is on');
-    extension = Main.extensionManager.lookup(UUID).stateObj;
-    keyboard = global.stage.context.get_backend().get_default_seat()
-        .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
-    Main.overview.hide();
-    await waitFor(() => !Main.overview.visible, 'the overview is hidden');
-    GLib.mkdir_with_parents(out, 0o755);
-
-    for (const app of apps) {
-        GLib.file_set_contents(app.file, '');
-        app.launch();
-        await waitFor(() => findWindow(app), `the ${app.name} window`);
-        await focus(app);
-        for (const [name, {preview, clear = false, commit, expected}] of cases) {
-            extension.Type(preview, true, clear);
-            await Scripting.sleep(300);
-            extension.Type(commit, false, false);
-            await Scripting.sleep(300);
-            // A preview left behind is reset with the mode it was shown with when the focus leaves.
-            await moveFocusAwayAndBack();
-            await shot(`${app.name} ${name}`.replace(/\W+/g, '-'));
-            equal(await app.text(), expected, `${app.name} ${name}`);
-            print(`PASS ${app.name} ${name}`);
-        }
-    }
-
-    const [editor, terminal] = apps.map(findWindow);
-    extension.MoveToWorkspace(editor.get_id(), 1);
+step('List reports the workspace of moved, stuck and unstuck windows', async () => {
+    const editorWindow = findWindow(editor);
+    const terminalWindow = findWindow(terminal);
+    extension.MoveToWorkspace(editorWindow.get_id(), 1);
     const workspaces = new Map(list('List').map(window => [window.id, window.workspace]));
-    equal(workspaces.get(editor.get_id()), 1, 'List workspace of a moved window');
-    equal(workspaces.get(terminal.get_id()), 0, 'List workspace of a window left on the first workspace');
-    extension.Stick(terminal.get_id());
-    const sticky = list('List').find(window => window.id === terminal.get_id());
+    equal(workspaces.get(editorWindow.get_id()), 1, 'List workspace of a moved window');
+    equal(workspaces.get(terminalWindow.get_id()), 0, 'List workspace of a window left on the first workspace');
+    extension.Stick(terminalWindow.get_id());
+    const sticky = list('List').find(window => window.id === terminalWindow.get_id());
     equal(sticky.workspace, -1, 'List workspace of a stuck window');
     equal(sticky.on_all_workspaces, true, 'List on_all_workspaces of a stuck window');
-    extension.Unstick(terminal.get_id());
-    const unstuck = list('List').find(window => window.id === terminal.get_id());
+    extension.Unstick(terminalWindow.get_id());
+    const unstuck = list('List').find(window => window.id === terminalWindow.get_id());
     equal(unstuck.workspace, 0, 'List workspace of an unstuck window, the active workspace');
-    print('PASS List workspace');
+});
 
+step('ListWorkspaces reports the workspace names set in GNOME', async () => {
     new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'}).set_strv('workspace-names', ['Mail']);
-    await waitFor(() => list('ListWorkspaces')[0].name === 'Mail', 'ListWorkspaces reports the name of workspace 0');
+    await Scripting.waitLeisure();
+    equal(list('ListWorkspaces')[0].name, 'Mail', 'ListWorkspaces name of workspace 0');
     equal(list('ListWorkspaces')[1].index, 1, 'ListWorkspaces index of the second workspace');
-    print('PASS ListWorkspaces');
+});
 
+step('ActivateWorkspace switches the active workspace', async () => {
     extension.ActivateWorkspace(1);
-    await waitFor(() => list('ListWorkspaces')[1].active, 'ListWorkspaces reports workspace 1 as active');
+    await waitFor(() => list('ListWorkspaces')[1].active, global.workspace_manager, ['active-workspace-changed']);
     equal(list('ListWorkspaces')[0].active, false, 'ListWorkspaces active of an inactive workspace');
-    print('PASS ActivateWorkspace');
+});
+
+step('Checking the lines typed into Text Editor', async () => {
+    // Text Editor adds a newline after the document's last line when it saves.
+    equal(readFile(editor.file), 'one\ntwo\nthree\nfour\n\n\n', 'Text Editor file');
+});
+
+step('Checking the lines typed into Terminal', async () => {
+    equal(readFile(terminal.file), 'one\ntwo\nthree\nfour\n\n', 'Terminal file');
+});
+
+export async function run() {
+    // The Shell starts a useless helper process with every automation script, so let's get rid of it.
+    (await Scripting._getPerfHelper()).ExitSync();
+    // Without this, the Shell tries to stop the helper again at the end and fails.
+    await Scripting.disableHelperAutoExit();
+    // A headless Shell has no keyboard, and the key events of Key() only reach applications through one. The device
+    // stays as long as this variable holds it.
+    const keyboard = global.stage.context.get_backend().get_default_seat()
+        .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    // shell-session.sh enables only the extension under test.
+    const [uuid] = global.settings.get_strv('enabled-extensions');
+    await waitFor(() => Main.extensionManager.lookup(uuid)?.stateObj, Main.extensionManager, ['extension-state-changed']);
+    extension = Main.extensionManager.lookup(uuid).stateObj;
+    Main.overview.hide();
+    await waitFor(() => !Main.overview.visible, Main.overview, ['hidden']);
+    GLib.mkdir_with_parents(out, 0o755);
+    for (const [name, act] of steps) {
+        await act();
+        print(`PASS ${name}`);
+    }
+    print(`${steps.length} Shell checks passed`);
 }
